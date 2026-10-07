@@ -13,7 +13,8 @@ One engine, four faces:
 - A native [Pi](https://github.com/earendil-works/pi) tool, also `wrangle`, that spawns through
   [Shepherdr](https://www.npmjs.com/package/@howaboua/pi-shepherdr) so the child stays monitored.
 - A skill, `wrangle`, that teaches an agent the orchestration procedure.
-- A Herdr plugin for cleanup on pane close and a fleet board (planned).
+- A Herdr plugin that releases a reservation when its pane closes and opens a
+  fleet board.
 
 ## How it decides
 
@@ -46,16 +47,16 @@ ones, because a lead probes a remote host by running `wrangle` there.
 
 ```sh
 # mise (no Rust toolchain needed)
-mise use -g github:oisin-ee/wrangle@v0.1.0
+mise use -g github:oisin-ee/wrangle@v0.1.1
 
 # or cargo
-cargo install --git https://github.com/oisin-ee/wrangle --tag v0.1.0
+cargo install --git https://github.com/oisin-ee/wrangle --tag v0.1.1
 ```
 
 The Pi tool and the skill come from the same repository:
 
 ```sh
-pi install git:github.com/oisin-ee/wrangle@v0.1.0
+pi install git:github.com/oisin-ee/wrangle@v0.1.1
 ```
 
 Add `wrangle` to your Pi settings `packages` to keep it on `pi update`. The
@@ -160,6 +161,23 @@ rows = [
   ],
 ]
 ```
+
+## Herdr plugin
+
+`herdr-plugin.toml` at the repository root declares two event hooks and one
+popup pane. Install it on every host:
+
+```sh
+herdr plugin install oisin-ee/wrangle --ref v0.1.1 --yes
+```
+
+- `pane.closed` and `pane.exited` run `wrangle release --pane <id>`. The
+  reservation attached to the pane ends at once instead of at its TTL.
+- The `board` pane runs `wrangle status --watch` in a popup. Open it with
+  `herdr plugin pane open --plugin wrangle --entrypoint board` or bind it to a key.
+
+The plugin does not build anything. It finds `wrangle` on the Herdr server's
+PATH, then through `mise x`, so install the binary first.
 
 ## Skill
 

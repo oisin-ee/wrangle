@@ -1,0 +1,28 @@
+# Herdr plugin manifest. Install: herdr plugin install oisin-ee/wrangle --ref vX.Y.Z --yes
+# The plugin only calls the wrangle binary; install that with mise or cargo first (see README).
+
+id = "wrangle"
+name = "wrangle"
+version = "0.1.1"
+min_herdr_version = "0.9.1"
+description = "Releases a child's wrangle reservation when its pane closes, and opens the fleet board."
+platforms = ["macos", "linux"]
+
+# Herdr sets HERDR_PANE_ID to the closed pane. The reservation attached to it ends at once
+# instead of at its TTL. A pane without a reservation is a no-op.
+[[events]]
+on = "pane.closed"
+command = ["sh", "plugin/release.sh"]
+
+[[events]]
+on = "pane.exited"
+command = ["sh", "plugin/release.sh"]
+
+# Every host, its headroom, reservations, and the queue; refreshes until you press q or Ctrl-C.
+[[panes]]
+id = "board"
+title = "wrangle"
+placement = "popup"
+width = "90%"
+height = "70%"
+command = ["sh", "plugin/board.sh"]
