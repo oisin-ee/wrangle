@@ -17,6 +17,7 @@ function runner(responses: Record<string, Raw>): { run: Runner; calls: string[][
 const ADMITTED = {
 	admitted: true,
 	ticket: "w-1-aaaa",
+	lead: "lead-1",
 	host: { id: "local", label: "local" },
 	probe: {
 		host: "local",

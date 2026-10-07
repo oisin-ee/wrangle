@@ -15,6 +15,7 @@ mod node;
 mod plan;
 mod probe;
 mod shell;
+mod spawn;
 
 use std::io::Write as _;
 use std::process::ExitCode;
@@ -151,6 +152,20 @@ fn lead(cmd: Command, fleet: &Fleet, json: bool) -> Result<ExitCode> {
 }
 
 /// The sidebar and notification commands.
+fn spawn_cmd(fleet: &Fleet, req: &spawn::SpawnRequest<'_>, json: bool) -> Result<ExitCode> {
+    let out = spawn::spawn(fleet, req)?;
+    print(json, &out, || match &out {
+        spawn::SpawnOutput::Spawned(s) => {
+            format!("spawned {} on {} in {}\n", s.name, s.host.label, s.pane_id)
+        }
+        spawn::SpawnOutput::Queued(q) => format!("queued {}: {}\n", q.ticket, q.reason),
+    })?;
+    Ok(match out {
+        spawn::SpawnOutput::Spawned(_) => ExitCode::SUCCESS,
+        spawn::SpawnOutput::Queued(_) => ExitCode::from(error::EXIT_FULL),
+    })
+}
+
 fn report(cmd: Command, fleet: &Fleet, json: bool) -> Result<ExitCode> {
     match cmd {
         Command::Mark {
@@ -207,6 +222,36 @@ fn report(cmd: Command, fleet: &Fleet, json: bool) -> Result<ExitCode> {
                 format!("prepared {} on {}\n", out.pane_id, out.host.label)
             })?;
             Ok(ExitCode::SUCCESS)
+        }
+        Command::Spawn {
+            ticket,
+            lead,
+            machine,
+            kind,
+            name,
+            label,
+            message,
+            branch,
+            base,
+            repo,
+            cwd,
+            workspace,
+        } => {
+            let req = spawn::SpawnRequest {
+                ticket: ticket.as_deref(),
+                lead: lead.as_deref(),
+                machine: machine.as_deref(),
+                kind: &kind,
+                name: &name,
+                label: label.as_deref(),
+                message: &message,
+                branch: branch.as_deref(),
+                base: base.as_deref(),
+                repo: repo.as_deref(),
+                cwd: cwd.as_deref(),
+                workspace: workspace.as_deref(),
+            };
+            spawn_cmd(fleet, &req, json)
         }
         Command::Notify { title, body } => {
             commands::notify(fleet, &title, &body)?;

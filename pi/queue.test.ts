@@ -8,6 +8,7 @@ const HOST = { id: "local", label: "local" };
 const ADMITTED = (ticket: string) => ({
 	admitted: true,
 	ticket,
+	lead: "lead-1",
 	host: HOST,
 	probe: {
 		host: "local",

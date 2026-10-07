@@ -2,7 +2,7 @@
 //! forwards a command to a saved machine over ssh, so every call runs from
 //! the lead's host.
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::shell::Shell;
 
 pub const SOURCE: &str = "wrangle";
@@ -95,6 +95,141 @@ pub fn queue_count(shell: &dyn Shell, pane: &str, count: usize) -> Result<()> {
         ]
     };
     shell.run_ok("herdr", &base(None, &words)).map(|_| ())
+}
+
+/// Where a created pane lives, so a failed start can close it again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Location {
+    pub pane_id: String,
+    pub workspace_id: String,
+    pub tab_id: String,
+    /// `workspace` when we created a workspace, `tab` when we added a tab.
+    pub created: Created,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Created {
+    Workspace,
+    Tab,
+}
+
+/// `tab create --workspace W …` when a workspace is given, else
+/// `workspace create …`; both return the root pane at a shell prompt.
+pub fn create_location(
+    shell: &dyn Shell,
+    machine: Option<&str>,
+    workspace: Option<&str>,
+    cwd: &str,
+    label: &str,
+) -> Result<Location> {
+    let (words, created): (Vec<&str>, Created) = match workspace {
+        Some(w) => (
+            vec![
+                "tab",
+                "create",
+                "--workspace",
+                w,
+                "--cwd",
+                cwd,
+                "--label",
+                label,
+                "--no-focus",
+            ],
+            Created::Tab,
+        ),
+        None => (
+            vec![
+                "workspace",
+                "create",
+                "--cwd",
+                cwd,
+                "--label",
+                label,
+                "--no-focus",
+            ],
+            Created::Workspace,
+        ),
+    };
+    let origin = format!("herdr {} {}", words[0], words[1]);
+    let out = shell.run_ok("herdr", &base(machine, &words))?;
+    let value: serde_json::Value = serde_json::from_str(&out.stdout).map_err(|e| Error::Parse {
+        origin: origin.clone(),
+        detail: format!("{e}: {}", out.stdout.trim()),
+    })?;
+    let field = |path: &[&str]| -> Result<String> {
+        let mut cur = &value["result"];
+        for key in path {
+            cur = &cur[key];
+        }
+        cur.as_str()
+            .map(ToString::to_string)
+            .ok_or_else(|| Error::Parse {
+                origin: origin.clone(),
+                detail: format!("missing result.{}", path.join(".")),
+            })
+    };
+    Ok(Location {
+        pane_id: field(&["root_pane", "pane_id"])?,
+        workspace_id: field(&["root_pane", "workspace_id"])?,
+        tab_id: field(&["root_pane", "tab_id"])?,
+        created,
+    })
+}
+
+/// Undo `create_location`.
+pub fn close_location(shell: &dyn Shell, machine: Option<&str>, location: &Location) -> Result<()> {
+    let words: Vec<&str> = match location.created {
+        Created::Workspace => vec!["workspace", "close", &location.workspace_id],
+        Created::Tab => vec!["tab", "close", &location.tab_id],
+    };
+    shell.run_ok("herdr", &base(machine, &words)).map(|_| ())
+}
+
+/// What `agent start` observed once the agent appeared in the pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Started {
+    /// Ready for a prompt.
+    Ready,
+    /// Herdr returned `agent_not_ready`: the agent is up but blocked on a
+    /// startup dialog. The name stays valid; answer the dialog, then prompt.
+    Blocked,
+}
+
+/// `agent start <name> --kind <kind> --pane <pane>`: returns when Herdr sees
+/// the agent in the pane.
+pub fn agent_start(
+    shell: &dyn Shell,
+    machine: Option<&str>,
+    name: &str,
+    kind: &str,
+    pane: &str,
+) -> Result<Started> {
+    let words = ["agent", "start", name, "--kind", kind, "--pane", pane];
+    let out = shell.run("herdr", &base(machine, &words))?;
+    if out.ok() {
+        return Ok(Started::Ready);
+    }
+    let text = format!("{}{}", out.stdout, out.stderr);
+    if text.contains("agent_not_ready") {
+        return Ok(Started::Blocked);
+    }
+    Err(Error::Command {
+        program: "herdr".to_string(),
+        args: base(machine, &words).join(" "),
+        status: out.status.to_string(),
+        stderr: text.trim().to_string(),
+    })
+}
+
+/// `agent prompt <name> <text>`: submits and returns without waiting.
+pub fn agent_prompt(
+    shell: &dyn Shell,
+    machine: Option<&str>,
+    name: &str,
+    text: &str,
+) -> Result<()> {
+    let words = ["agent", "prompt", name, text];
+    shell.run_ok("herdr", &base(machine, &words)).map(|_| ())
 }
 
 /// A toast in the lead's Herdr window. Failure is not fatal to the caller.

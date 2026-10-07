@@ -100,6 +100,7 @@ export type HostReport = Static<typeof HostReport>;
 export const Admitted = Type.Object({
 	admitted: Type.Literal(true),
 	ticket: Type.String(),
+	lead: Type.String(),
 	host: Host,
 	probe: Probe,
 	headroom: Headroom,

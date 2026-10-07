@@ -16,6 +16,7 @@ const PROBE = {
 const ADMITTED = {
 	admitted: true,
 	ticket: "w-1-aaaa",
+	lead: "lead-1",
 	host: HOST,
 	probe: PROBE,
 	headroom: { host: HOST.id, headroom: 22, eligible: true, live_agents: 3 },

@@ -11,6 +11,10 @@ All notable changes to this project are documented in this file.
   re-admits the oldest ticket, admission sends a `wrangle` wake-up message, `wrangle ticket=…`
   reuses the stored arguments; queued tickets show in a widget above the editor, as a
   `queue` token on the lead's Herdr pane, and as a toast.
+- CLI `spawn` for harnesses that are not Pi (Claude Code, Codex, …): admit or resume a ticket,
+  place a pane (the `prepare` hook with `--branch`, else a new tab or workspace), `herdr agent
+  start`, mark, `herdr agent prompt`. An agent blocked on a startup dialog keeps its pane and
+  returns `status: blocked` with the next step.
 - Engine: `prepare` command runs the policy's `[hooks] prepare` template on a host.
 - Engine: `probe`, `admit`, `release`, `status`, `cancel`, `mark`, `queue`, `notify`, and the
   per-host `host` primitives. Balanced admission by headroom, TTL reservations under a

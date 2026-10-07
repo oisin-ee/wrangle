@@ -108,6 +108,44 @@ pub enum Command {
         #[arg(long)]
         repo: Option<String>,
     },
+    /// Admit, place, start, mark, and prompt a child for a non-Pi harness.
+    /// Exit 1 with a queued ticket when every host is full; retry with `--ticket`.
+    Spawn {
+        /// Resume a queued ticket (from an earlier `spawn` or `admit`).
+        #[arg(long, required_unless_present = "lead")]
+        ticket: Option<String>,
+        /// Your agent name; required without `--ticket`.
+        #[arg(long, required_unless_present = "ticket")]
+        lead: Option<String>,
+        /// Pin to one host (id or label).
+        #[arg(long)]
+        machine: Option<String>,
+        /// Herdr agent kind: pi, claude, codex, …
+        #[arg(long)]
+        kind: String,
+        /// Herdr agent name for the child.
+        #[arg(long)]
+        name: String,
+        /// Tab label; default: the name.
+        #[arg(long)]
+        label: Option<String>,
+        /// The child's task.
+        #[arg(long)]
+        message: String,
+        /// Writer branch: runs the `prepare` hook on the admitted host.
+        #[arg(long)]
+        branch: Option<String>,
+        #[arg(long)]
+        base: Option<String>,
+        #[arg(long)]
+        repo: Option<String>,
+        /// Working directory for a new workspace or tab (no `--branch`); default: this directory.
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Add a tab to this workspace instead of creating a workspace (no `--branch`).
+        #[arg(long)]
+        workspace: Option<String>,
+    },
     /// Show a toast in this host's Herdr window.
     Notify {
         title: String,

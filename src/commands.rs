@@ -17,6 +17,7 @@ use crate::probe::Probe;
 pub struct Admitted {
     pub admitted: bool,
     pub ticket: String,
+    pub lead: String,
     pub host: Host,
     pub probe: Probe,
     pub headroom: Headroom,
@@ -125,6 +126,7 @@ pub fn admit(
         return Ok(AdmitOutput::Admitted(Box::new(Admitted {
             admitted: true,
             ticket,
+            lead,
             host: r.host.clone(),
             probe: r.probe.clone().unwrap_or_else(|| empty_probe(&r.host)),
             headroom: r.headroom.clone().unwrap_or_else(|| Headroom {
@@ -157,6 +159,7 @@ pub fn admit(
                         return Ok(AdmitOutput::Admitted(Box::new(Admitted {
                             admitted: true,
                             ticket,
+                            lead,
                             host: host.clone(),
                             probe: outcome.probe,
                             headroom: outcome.headroom,
