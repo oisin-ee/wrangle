@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.1.0 - 2026-10-08
+
 - Skill `wrangle`: the orchestration procedure for Pi and for shell harnesses.
 - README: install, configuration, CLI, Pi tool, sidebar rows, skill.
 
