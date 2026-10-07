@@ -98,10 +98,12 @@ export class Engine {
 		return parsed;
 	}
 
-	admit(lead: string, options: { machine?: string; ticket?: string }, signal?: AbortSignal) {
+	/** A ticket re-admits an existing queue entry; otherwise a lead opens a new one. */
+	admit(options: { lead?: string; machine?: string; ticket?: string }, signal?: AbortSignal) {
 		const args = ["admit"];
 		if (options.ticket) args.push("--ticket", options.ticket);
-		else args.push("--lead", lead);
+		else if (options.lead) args.push("--lead", options.lead);
+		else throw new EngineError("admit needs a lead or a ticket", "invalid");
 		if (options.machine) args.push("--machine", options.machine);
 		return this.exec(AdmitOutput, args, signal);
 	}

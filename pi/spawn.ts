@@ -84,12 +84,11 @@ export async function runSpawn(
 	required(params.agent_type, "agent_type");
 	required(params.message, "message");
 	const admit = await engine.admit(
-		lead,
 		params.ticket
 			? { ticket: params.ticket }
 			: params.machine
-				? { machine: params.machine }
-				: {},
+				? { lead, machine: params.machine }
+				: { lead },
 		signal,
 	);
 	if ("queued" in admit) {

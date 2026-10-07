@@ -32,21 +32,21 @@ const ADMITTED = {
 
 test("admit parses exit 0 as Admitted and passes --lead/--machine", async () => {
 	const fake = runner({ admit: { code: 0, stdout: JSON.stringify(ADMITTED), stderr: "" } });
-	const out = await new Engine(fake.run).admit("lead-1", { machine: "netcup" });
+	const out = await new Engine(fake.run).admit({ lead: "lead-1", machine: "netcup" });
 	assert.equal("admitted" in out, true);
 	assert.deepEqual(fake.calls[0], ["admit", "--lead", "lead-1", "--machine", "netcup"]);
 });
 
 test("admit with a ticket does not resend --lead", async () => {
 	const fake = runner({ admit: { code: 0, stdout: JSON.stringify(ADMITTED), stderr: "" } });
-	await new Engine(fake.run).admit("lead-1", { ticket: "w-1-aaaa" });
+	await new Engine(fake.run).admit({ ticket: "w-1-aaaa" });
 	assert.deepEqual(fake.calls[0], ["admit", "--ticket", "w-1-aaaa"]);
 });
 
 test("admit parses exit 1 as Queued", async () => {
 	const queued = { queued: true, ticket: "w-2-bbbb", hosts: [], reason: "all full" };
 	const fake = runner({ admit: { code: 1, stdout: JSON.stringify(queued), stderr: "" } });
-	const out = await new Engine(fake.run).admit("lead-1", {});
+	const out = await new Engine(fake.run).admit({ lead: "lead-1" });
 	assert.equal("queued" in out && out.ticket, "w-2-bbbb");
 });
 
