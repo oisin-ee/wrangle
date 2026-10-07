@@ -439,7 +439,7 @@ mod tests {
         let shell = Fake::new();
         shell
             .on("herdr machine list --json", MACHINES)
-            .on("sysctl -n vm.loadavg", local_load)
+            .with_load(local_load)
             .on("df -Pk /tmp/home", "FS 1000 500 400 60% /\n")
             .on("herdr agent list", r#"{"result":{"agents":[]}}"#);
         Rig {
@@ -462,7 +462,6 @@ mod tests {
         format!("ssh {}", argv.join(" "))
     }
 
-    #[cfg(not(target_os = "linux"))]
     #[test]
     fn admit_prefers_the_host_with_more_headroom() {
         // Local: nearly full. Remote netcup: idle 16 cores.

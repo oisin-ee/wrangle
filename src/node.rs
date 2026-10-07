@@ -111,7 +111,7 @@ mod tests {
 
     fn fake_shell(load: &str, agents: &str) -> Fake {
         let fake = Fake::new();
-        fake.on("sysctl -n vm.loadavg", load)
+        fake.with_load(load)
             .on("df -Pk /tmp/home", "FS 1000 500 400 60% /\n")
             .on("herdr agent list", agents);
         fake
@@ -132,7 +132,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(target_os = "linux"))]
     #[test]
     fn reserve_admits_until_headroom_is_gone() {
         let cores = f64::from(probe::cores());

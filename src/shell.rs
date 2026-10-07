@@ -26,6 +26,12 @@ pub trait Shell: Send + Sync + std::fmt::Debug {
     /// `Err` only when the process could not be started.
     fn run(&self, program: &str, args: &[String]) -> Result<Output>;
 
+    /// Read a whole file (for `/proc/loadavg`). Fakes script this too so the
+    /// probe tests run the same on every platform.
+    fn read_file(&self, path: &str) -> Result<String> {
+        Ok(std::fs::read_to_string(path)?)
+    }
+
     /// Run and treat a non-zero status as an error.
     fn run_ok(&self, program: &str, args: &[String]) -> Result<Output> {
         let out = self.run(program, args)?;
@@ -94,6 +100,11 @@ impl Fake {
         self
     }
 
+    /// Script the one-minute load (the probe reads `/proc/loadavg` first).
+    pub fn with_load(&self, load: &str) -> &Self {
+        self.on("read /proc/loadavg", load)
+    }
+
     pub fn calls(&self) -> Vec<String> {
         self.calls.lock().map(|c| c.clone()).unwrap_or_default()
     }
@@ -101,6 +112,11 @@ impl Fake {
 
 #[cfg(test)]
 impl Shell for Fake {
+    /// Files are scripted under the key `read <path>`.
+    fn read_file(&self, path: &str) -> Result<String> {
+        self.run("read", &[path.to_string()]).map(|o| o.stdout)
+    }
+
     fn run(&self, program: &str, args: &[String]) -> Result<Output> {
         let key = std::iter::once(program.to_string())
             .chain(args.iter().cloned())

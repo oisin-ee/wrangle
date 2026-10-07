@@ -101,7 +101,7 @@ fn admit_queues_when_full_and_admits_when_loosened() {
     let rig = Rig::new("admit");
     rig.fake_herdr(r#"{"result":{"agents":[]}}"#);
     // Nothing is admissible: no load headroom at all.
-    let strict = rig.config("load_per_core_max = 0.0\n");
+    let strict = rig.config("load_per_core_max = 0.0\ndisk_free_min_percent = 0\n");
     let (code, v, _) = rig.run(&["admit", "--lead", "lead-a"], Some(&strict));
     assert_eq!(code, 1, "{v}");
     assert_eq!(v["queued"], true);

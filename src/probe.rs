@@ -63,17 +63,15 @@ pub fn cores() -> u32 {
     std::thread::available_parallelism().map_or(1, |n| n.get() as u32)
 }
 
-#[cfg(target_os = "linux")]
-pub fn load1(_shell: &dyn Shell) -> Result<f64> {
-    let text = std::fs::read_to_string("/proc/loadavg")?;
-    parse_loadavg(&text).ok_or_else(|| Error::Parse {
-        origin: "/proc/loadavg".to_string(),
-        detail: text.trim().to_string(),
-    })
-}
-
-#[cfg(not(target_os = "linux"))]
+/// One-minute load: `/proc/loadavg` where it exists (Linux), else
+/// `sysctl -n vm.loadavg` (macOS, BSD).
 pub fn load1(shell: &dyn Shell) -> Result<f64> {
+    if let Ok(text) = shell.read_file("/proc/loadavg") {
+        return parse_loadavg(&text).ok_or_else(|| Error::Parse {
+            origin: "/proc/loadavg".to_string(),
+            detail: text.trim().to_string(),
+        });
+    }
     let out = shell.run_ok("sysctl", &["-n".to_string(), "vm.loadavg".to_string()])?;
     parse_loadavg(&out.stdout).ok_or_else(|| Error::Parse {
         origin: "sysctl vm.loadavg".to_string(),
