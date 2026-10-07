@@ -143,6 +143,13 @@ test("wake text and widget lines name the ticket and the label", () => {
 	assert.match(wakeText(t, "netcup"), /wrangle ticket=w-1-aaaa/);
 	assert.deepEqual(widgetLines([], 5_000), []);
 	assert.deepEqual(widgetLines([t], 11_000), ["wrangle w-1-aaaa unit-w-1-aaaa: queued 10s"]);
+	assert.deepEqual(
+		widgetLines(
+			[{ ...t, reason: "local: load 5 + 0 reserved ≥ 1.5 × 12 cores; netcup: disk 13.4% free < 15.0%; momokaya-2: ssh momokaya-2-dev: exit 127" }],
+			11_000,
+		),
+		["wrangle w-1-aaaa unit-w-1-aaaa: queued 10s · local full, netcup disk, momokaya-2 unreachable"],
+	);
 	assert.deepEqual(widgetLines([{ ...t, state: "admitted", host: "netcup" }], 11_000), [
 		"wrangle w-1-aaaa unit-w-1-aaaa: admitted on netcup",
 	]);

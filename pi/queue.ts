@@ -170,6 +170,20 @@ export function wakeText(ticket: Ticket, host: string): string {
 	);
 }
 
+/** "local: load 53.65 + 0 reserved ≥ 1.5 × 12 cores; netcup: …" → "local full, netcup full". */
+export function shortReason(reason: string): string {
+	return reason
+		.split(";")
+		.map((part) => {
+			const [host, detail = ""] = part.split(":", 2).map((s) => s.trim());
+			if (!host) return "";
+			const kind = /^load/.test(detail) ? "full" : /^disk/.test(detail) ? "disk" : "unreachable";
+			return `${host} ${kind}`;
+		})
+		.filter(Boolean)
+		.join(", ");
+}
+
 /** Widget lines, one per ticket; empty when nothing is queued. */
 export function widgetLines(tickets: readonly Ticket[], now = Date.now()): string[] {
 	if (tickets.length === 0) return [];
@@ -177,7 +191,9 @@ export function widgetLines(tickets: readonly Ticket[], now = Date.now()): strin
 		const label = t.params.label ?? t.params.agent_type ?? "child";
 		const age = Math.max(0, Math.round((now - t.createdAt) / 1000));
 		const where =
-			t.state === "admitted" ? `admitted on ${t.host ?? "?"}` : `queued ${age}s${t.reason ? ` · ${t.reason}` : ""}`;
+			t.state === "admitted"
+				? `admitted on ${t.host ?? "?"}`
+				: `queued ${age}s${t.reason ? ` · ${shortReason(t.reason)}` : ""}`;
 		return `wrangle ${t.ticket} ${label}: ${where}`;
 	});
 }
