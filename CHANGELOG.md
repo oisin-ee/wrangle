@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Skill `wrangle`: the orchestration procedure for Pi and for shell harnesses.
+- README: install, configuration, CLI, Pi tool, sidebar rows, skill.
+
 - Pi tool `wrangle`: `spawn` (default) admits on the host with the most headroom, runs the
   `prepare` hook when `branch` is set, calls Shepherdr `agents spawn` on that host, and marks
   the child pane; `status`, `cancel`, `help`. Queued calls return a ticket at once.
