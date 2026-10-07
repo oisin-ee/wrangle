@@ -39,6 +39,8 @@ pub enum Error {
     Full,
     #[error("{0}")]
     Invalid(String),
+    #[error("prepare hook printed no `pane_id`: {detail}")]
+    Hook { detail: String },
 }
 
 impl Error {

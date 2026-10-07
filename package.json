@@ -21,7 +21,8 @@
     "node": ">=20.6.0"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test \"pi/**/*.test.ts\""
   },
   "pi": {
     "extensions": ["./pi/index.ts"],

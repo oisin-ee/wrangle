@@ -94,6 +94,20 @@ pub enum Command {
         #[arg(long)]
         count: usize,
     },
+    /// Run the `prepare` hook (default: `agent:worktree`) on a host; prints its `pane_id`.
+    Prepare {
+        /// Host to prepare on; default `local`.
+        #[arg(long)]
+        machine: Option<String>,
+        #[arg(long)]
+        branch: String,
+        /// Base ref for the new branch; empty when omitted.
+        #[arg(long, default_value = "")]
+        base: String,
+        /// Repository path (or name, if the hook resolves names); default: this directory.
+        #[arg(long)]
+        repo: Option<String>,
+    },
     /// Show a toast in this host's Herdr window.
     Notify {
         title: String,

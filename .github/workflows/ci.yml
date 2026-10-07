@@ -50,3 +50,5 @@ jobs:
       - run: npm ci
       - name: Typecheck
         run: npm run --silent typecheck
+      - name: Shim tests
+        run: npm run --silent test

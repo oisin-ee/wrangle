@@ -8,6 +8,7 @@ mod commands;
 mod config;
 mod error;
 mod herdr;
+mod hook;
 mod hosts;
 mod ledger;
 mod node;
@@ -182,6 +183,28 @@ fn report(cmd: Command, fleet: &Fleet, json: bool) -> Result<ExitCode> {
             let out = commands::queue(fleet, &pane, count)?;
             print(json, &out, || {
                 format!("reported {} queued on {}\n", out.count, out.pane)
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Prepare {
+            machine,
+            branch,
+            base,
+            repo,
+        } => {
+            let host = match machine.as_deref() {
+                Some(m) => fleet.find(m)?,
+                None => fleet.find(hosts::LOCAL)?,
+            };
+            let cwd = std::env::current_dir()?.display().to_string();
+            let inputs = hook::HookInputs {
+                repo: repo.as_deref().unwrap_or(&cwd),
+                branch: &branch,
+                base: &base,
+            };
+            let out = hook::run(fleet, host, inputs)?;
+            print(json, &out, || {
+                format!("prepared {} on {}\n", out.pane_id, out.host.label)
             })?;
             Ok(ExitCode::SUCCESS)
         }

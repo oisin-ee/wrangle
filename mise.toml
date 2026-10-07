@@ -19,11 +19,16 @@ run = "cargo test"
 description = "Strict TypeScript check of the Pi shim"
 run = "npm run --silent typecheck"
 
+[tasks."test:shim"]
+description = "Pi shim tests (node --test over the .ts sources)"
+run = "npm run --silent test"
+
 [tasks.check]
-description = "Everything CI runs: fmt --check, clippy, test, tsc"
+description = "Everything CI runs: fmt --check, clippy, test, tsc, shim tests"
 run = [
   "cargo fmt --check",
   "cargo clippy --all-targets -- -D warnings",
   "cargo test",
   "npm run --silent typecheck",
+  "npm run --silent test",
 ]

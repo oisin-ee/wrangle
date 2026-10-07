@@ -180,6 +180,43 @@ fn bad_config_is_an_error_not_a_default() {
 }
 
 #[test]
+fn prepare_runs_the_hook_template_and_parses_pane_id() {
+    let rig = Rig::new("prepare");
+    rig.fake_herdr(r#"{"result":{"agents":[]}}"#);
+    // The hook logs its rendered inputs to a file, then prints the JSON line.
+    let log = rig.dir.join("hook.log");
+    let config = rig.config(&format!(
+        "[hooks]\nprepare = [\"sh\", \"-c\", \"echo preparing {{branch}} from {{base}} in {{repo}} > {}; echo '{{\\\"pane_id\\\":\\\"w5:p1\\\",\\\"workspace_id\\\":\\\"w5\\\"}}'\"]\n",
+        log.display()
+    ));
+    let (code, v, stderr) = rig.run(
+        &[
+            "prepare",
+            "--branch",
+            "feat-x",
+            "--base",
+            "main",
+            "--repo",
+            "/tmp/repo",
+        ],
+        Some(&config),
+    );
+    assert_eq!(code, 0, "{v} {stderr}");
+    assert_eq!(v["pane_id"], "w5:p1");
+    assert_eq!(v["workspace_id"], "w5");
+    assert_eq!(v["host"]["id"], "local");
+    assert_eq!(
+        fs::read_to_string(&log).unwrap().trim(),
+        "preparing feat-x from main in /tmp/repo"
+    );
+
+    let silent = rig.config("[hooks]\nprepare = [\"true\"]\n");
+    let (code, v, _) = rig.run(&["prepare", "--branch", "feat-y"], Some(&silent));
+    assert_eq!(code, 2);
+    assert!(v["error"].as_str().unwrap().contains("pane_id"));
+}
+
+#[test]
 fn host_primitives_run_standalone() {
     let rig = Rig::new("host");
     rig.fake_herdr(r#"{"result":{"agents":[]}}"#);
