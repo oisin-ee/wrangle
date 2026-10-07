@@ -1,0 +1,6 @@
+# CI installs this toolchain with `rustup toolchain install`. Homebrew and Nix
+# cargo ignore the file; keep their rust at or above `rust-version` in Cargo.toml.
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

@@ -1,0 +1,29 @@
+# Local tasks. CI runs the same commands (see .github/workflows/ci.yml).
+[tools]
+node = "24"
+lefthook = "latest"
+
+[tasks.fmt]
+description = "Format Rust and check nothing else drifts"
+run = "cargo fmt"
+
+[tasks.lint]
+description = "Clippy with warnings as errors, every target"
+run = "cargo clippy --all-targets -- -D warnings"
+
+[tasks.test]
+description = "Rust unit and integration tests"
+run = "cargo test"
+
+[tasks.typecheck]
+description = "Strict TypeScript check of the Pi shim"
+run = "npm run --silent typecheck"
+
+[tasks.check]
+description = "Everything CI runs: fmt --check, clippy, test, tsc"
+run = [
+  "cargo fmt --check",
+  "cargo clippy --all-targets -- -D warnings",
+  "cargo test",
+  "npm run --silent typecheck",
+]

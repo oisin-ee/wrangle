@@ -1,0 +1,51 @@
+[package]
+name = "wrangle"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+description = "Admit, queue, and spawn coding agents across Herdr hosts"
+license = "MIT"
+repository = "https://github.com/oisin-ee/wrangle"
+readme = "README.md"
+keywords = ["herdr", "agents", "orchestration", "pi"]
+categories = ["command-line-utilities", "development-tools"]
+publish = false
+
+# `publish = false` keeps the crate off crates.io; this tells cargo-dist to
+# still build and release the binary.
+[package.metadata.dist]
+dist = true
+
+[[bin]]
+name = "wrangle"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+toml = "1.1.6"
+
+[lints.rust]
+unsafe_code = "forbid"
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+# The profile that `cargo dist` builds with. Small, stripped, and fast enough for
+# a CLI that runs once per spawn.
+[profile.dist]
+inherits = "release"
+lto = "thin"
+strip = true
+codegen-units = 1

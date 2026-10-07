@@ -1,0 +1,7 @@
+# Git hooks for this repo, managed by lefthook (https://lefthook.dev).
+# Run `lefthook install` once after cloning to wire these into .git/hooks.
+
+pre-commit:
+  commands:
+    check:
+      run: mise run check
