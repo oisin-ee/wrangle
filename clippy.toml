@@ -1,0 +1,4 @@
+# Tests may unwrap, expect, and panic; the binary may not (Cargo.toml [lints]).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
