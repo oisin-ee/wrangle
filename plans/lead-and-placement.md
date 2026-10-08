@@ -1,6 +1,6 @@
 # Plan: one lead per repo, mechanical placement, Jev for the profile, visible fleet
 
-Status: revised after review (Jev dropped). Two units, independent after Unit 1.
+Status: implemented on `feat/lead` (Unit 1) and `feat/fleet-widget` (Unit 2, stacked on Unit 1). Agent repo rule on `feat/wrangle-lead`.
 
 ## Context
 
@@ -55,19 +55,19 @@ Out of scope for now (user decision): a decision model for `agent_type`. The lea
 ## Steps
 
 Unit 1 — lead and layout (branch `feat/lead`)
-- [ ] `src/probe.rs`: parse `name`, `pane_id`, `workspace_id`, `display_agent`, tokens from `herdr agent list`; test with a fixture that has a `role=lead` row.
-- [ ] `src/herdr.rs`: `lead_mark(pane, repo)`, `lead_clear(pane)`; `mark` adds `--token lead=<id>`; tests.
-- [ ] `src/commands.rs`/`src/cli.rs`: `wrangle lead --repo <name> [--take-over] --json` → `{claimed}` or exit 1 `{lead_exists, pane, workspace}`; `status` lists leads with their children.
-- [ ] `pi/spawn.ts`: `leadId(cwd)`; `spawnArguments` applies the layout rule; `runSpawn` calls `engine.lead()` first and maps exit 1 to `toolError`.
-- [ ] `pi/types.ts`: remove `placement`, `workspace`; add `take_over?: boolean`; update `pi/spawn.test.ts`.
-- [ ] `skills/wrangle/SKILL.md` + `README.md`: "one lead per repo; if `lead_exists`, `agents send` the unit to that lead".
-- [ ] Agent repo `20-delegation.md`: same sentence; remove the placement guidance.
+- [x] `src/probe.rs`: parse `name`, `pane_id`, `workspace_id`, `display_agent`, tokens from `herdr agent list`; test with a fixture that has a `role=lead` row.
+- [x] `src/herdr.rs`: `lead_mark(pane, repo)`, `lead_clear(pane)`; `mark` adds `--token lead=<id>`; tests.
+- [x] `src/commands.rs`/`src/cli.rs`: `wrangle lead --repo <name> [--take-over] --json` → `{claimed}` or exit 1 `{lead_exists, pane, workspace}`; `status` lists leads with their children.
+- [x] `pi/spawn.ts`: `leadId(cwd)`; `spawnArguments` applies the layout rule; `runSpawn` calls `engine.lead()` first and maps exit 1 to `toolError`.
+- [x] `pi/types.ts`: remove `placement`, `workspace`; add `take_over?: boolean`; update `pi/spawn.test.ts`.
+- [x] `skills/wrangle/SKILL.md` + `README.md`: "one lead per repo; if `lead_exists`, `agents send` the unit to that lead".
+- [x] Agent repo `20-delegation.md`: same sentence; remove the placement guidance.
 
 Unit 2 — visibility (branch `feat/fleet-widget`)
-- [ ] `pi/queue.ts`: `fleetLines(...)`; tests.
-- [ ] `pi/index.ts`: spawned toast; refresh on tool call, poll tick, and 60 s timer while children > 0.
-- [ ] `src/commands.rs`: `status --sidebar` prints the TOML block; `herdr-sidebar.toml` at repo root.
-- [ ] README: replace the "Sidebar marks" block with `wrangle status --sidebar`.
+- [x] `pi/queue.ts`: `fleetLines(...)`; tests.
+- [x] `pi/index.ts`: spawned toast; refresh on tool call, poll tick, and 60 s timer while children > 0.
+- [x] `src/commands.rs`: `status --sidebar` prints the TOML block; `herdr-sidebar.toml` at repo root.
+- [x] README: replace the "Sidebar marks" block with `wrangle status --sidebar`.
 
 ## Verification
 
@@ -81,3 +81,11 @@ Unit 2 — visibility (branch `feat/fleet-widget`)
 2. Lead scope is per repo, not per host: `lead:<repo>`; the lead's own pane stays where the user opened it. Remote children still open through the prepare hook or a new tab in the lead's workspace on their host.
 3. No decision model in this round. `agent_type` stays the lead's choice; host and layout are arithmetic.
 4. Sidebar rows remain a one-time paste; wrangle does not edit `~/.config/herdr/config.toml`.
+
+## Results (2026-10-08)
+
+- `mise run check` passes on both branches (lefthook pre-commit): 48 unit + 11 CLI Rust tests, 27 shim tests, clippy `-D warnings`, tsc.
+- Live check in Herdr: `wrangle lead` on this Pi pane claimed `⌂ e2e-repo`; a second pane got `lead_exists` (exit 1); `HERDR_PANE_ID=<second> wrangle spawn …` was refused with exit 2 before admit; `wrangle status` listed the lead first. Marks were cleared afterwards.
+- `wrangle status --sidebar` output passes `herdr config check` when appended to the user's config; a malformed rule fails the same check.
+- Deviation: the agent repo's `20-delegation.md` had no placement guidance to remove; it gained the one-lead and no-layout sentences instead. The vendored skill in the agent repo stays at the released revision until a wrangle release.
+- Finding: `herdr agent list` lists only panes that run an agent. A lead mark on a plain shell pane is invisible, so it never blocks a claim. A lead counts only while its agent runs.
