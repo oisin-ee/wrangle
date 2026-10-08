@@ -495,3 +495,18 @@ fn host_primitives_run_standalone() {
     let (_, v, _) = rig.run(&["host", "release", "--pane", "w9:p9"], None);
     assert_eq!(v["released"], 1);
 }
+
+#[test]
+fn status_sidebar_prints_the_herdr_rows() {
+    let rig = Rig::new("sidebar");
+    rig.fake_herdr(r#"{"result":{"agents":[]}}"#);
+    let (code, v, _) = rig.run(&["status", "--sidebar"], None);
+    assert_eq!(code, 0, "{v}");
+    let text = v["sidebar"].as_str().unwrap();
+    assert!(text.contains("[ui.sidebar.agents]"));
+    assert!(text.contains("$lead"));
+    assert!(text.contains("starts_with = \"⌂\""));
+    // It is valid TOML with the rows Herdr reads.
+    let parsed: toml::Value = toml::from_str(text).unwrap();
+    assert!(parsed["ui"]["sidebar"]["agents"]["rows"].is_array());
+}

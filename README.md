@@ -107,7 +107,7 @@ Every command accepts `--json`. Exit codes: 0 ok, 1 every host is full (the
 body carries the ticket), 2 error.
 
 ```sh
-wrangle status                      # leads and children, hosts, headroom, queue
+wrangle status [--sidebar]          # leads and children, hosts, headroom, queue
 wrangle lead [--repo .] [--take-over]  # claim ⌂ <repo> on $HERDR_PANE_ID; exit 1 when held
 wrangle probe [--machine netcup]    # the raw per-host numbers
 wrangle admit --lead main-verify    # reserve a slot; exit 1 with a ticket when full
@@ -162,27 +162,37 @@ calls `wrangle ticket=<ticket>`; the stored arguments are reused.
 Other actions: `wrangle action=status`, `wrangle action=cancel ticket=…`,
 `wrangle action=help`.
 
-## Sidebar marks
+## What you see
 
-The tool reports metadata on each child pane: `display_agent` becomes
-`↳ <name>`, the `sub` token is `●`, and the `lead` token names the lead. The
-lead's pane shows `⌂ <repo>`. The
-lead's own pane gets `queue = "N queued"` while it has tickets. Herdr keeps
-this metadata until it restarts; the tool reports it again on every call.
+In the lead's Pi session:
 
-To show the marks, add rows to your Herdr `config.toml`:
+- A widget above the editor while the session leads a repository or has
+  tickets: `⌂ rondo · 3 children: 1 idle 2 working · 0 queued · local 5.7
+  netcup 19.3 momokaya-2 10.2`, then one line per queued ticket. It refreshes
+  after every `wrangle` call and every 60 s while children run or tickets wait.
+- A Herdr toast for each spawn (`unit a → netcup (headroom 19.3)`), each queued
+  ticket, and each spawn refused with `lead_exists`.
 
-```toml
-[ui.sidebar.agents]
-rows = [
-  ["state_icon", { token = "$sub", fg = "#f38ba8", bold = true }, "machine", "workspace"],
-  [
-    { token = "agent", rules = [{ starts_with = "↳", fg = "#f38ba8" }, { starts_with = "⌂", fg = "#89b4fa", bold = true }] },
-    { token = "$lead", dim = true },
-    { token = "$queue", fg = "#f9e2af", bold = true },
-  ],
-]
+In the Herdr sidebar, once you add the rows below:
+
+- The lead's pane shows `⌂ <repo>` in blue, with `N queued` while it waits.
+- Each child shows `↳ <name>` in red, a red `●` after its state icon, and the
+  lead that owns it.
+
+Herdr keeps this metadata until it restarts; the tool reports it again on
+every call. `wrangle status` (and the `board` popup) lists every lead with its
+children before the hosts.
+
+To show the sidebar marks, print the rows and add them to your Herdr
+`config.toml` once:
+
+```sh
+wrangle status --sidebar >> ~/.config/herdr/config.toml   # skip if you already have [ui.sidebar.agents]
+herdr config check && herdr server reload-config
 ```
+
+The rows are in [`herdr-sidebar.toml`](herdr-sidebar.toml). If your config
+already has `[ui.sidebar.agents]`, merge the `rows` by hand.
 
 ## Herdr plugin
 

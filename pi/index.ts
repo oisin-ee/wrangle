@@ -5,18 +5,24 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Engine, EngineError } from "./engine.ts";
 import {
 	ENTRY_TYPE,
+	type FleetView,
+	fleetLines,
 	isQueueState,
+	liveChildren,
 	MESSAGE_TYPE,
 	Queue,
 	type QueuePort,
 	type Ticket,
 	wakeText,
-	widgetLines,
 } from "./queue.ts";
 import { hostLine, message, runSpawn, self, toolError, toolResult } from "./spawn.ts";
 import { type Status, WrangleParameters, type WrangleParams } from "./types.ts";
 
 export const WIDGET_ID = "wrangle";
+/** Session entry that remembers this session's lead, so a resumed lead shows its widget. */
+export const LEAD_ENTRY = "wrangle-lead";
+/** How often the widget re-reads the fleet while children run or tickets wait. */
+export const FLEET_REFRESH_MS = 60_000;
 
 export const HELP = `wrangle: spawn child agents without picking a host.
 
@@ -32,7 +38,7 @@ Calls (action defaults to spawn):
     When every host is full it returns {queued, ticket} at once; a wrangle
     message arrives when the ticket is admitted. Then call
     wrangle ticket=<ticket>; the stored arguments are reused. Never poll.
-  wrangle action=status      hosts, headroom, your queue
+  wrangle action=status      leads and children, hosts, headroom, your queue
   wrangle action=cancel ticket=…
   wrangle action=help
 
@@ -42,6 +48,49 @@ export default function wrangle(pi: ExtensionAPI) {
 	const engine = new Engine();
 	let context: ExtensionContext | undefined;
 	let lastCount = -1;
+	let leadId: string | undefined;
+	let view: FleetView | undefined;
+	let tickets: readonly Ticket[] = [];
+	let fleetTimer: ReturnType<typeof setTimeout> | undefined;
+
+	const paint = () => {
+		if (!context?.hasUI) return;
+		const lines = fleetLines(view, tickets);
+		context.ui.setWidget(WIDGET_ID, lines.length ? lines : undefined, { placement: "aboveEditor" });
+	};
+
+	/** Take a fresh status: this session's lead and the hosts. */
+	const absorb = (status: Status) => {
+		const pane = process.env["HERDR_PANE_ID"];
+		const leads = status.leads ?? [];
+		const lead =
+			leads.find((l) => pane !== undefined && l.pane === pane) ??
+			(leadId ? leads.find((l) => l.lead === leadId) : undefined);
+		view = lead ? { lead, hosts: status.hosts } : { hosts: status.hosts };
+		paint();
+	};
+
+	const stopFleet = () => {
+		if (fleetTimer) clearTimeout(fleetTimer);
+		fleetTimer = undefined;
+	};
+
+	const scheduleFleet = () => {
+		stopFleet();
+		if (liveChildren(view) === 0 && tickets.length === 0) return;
+		fleetTimer = setTimeout(() => void refresh(), FLEET_REFRESH_MS);
+		fleetTimer.unref?.();
+	};
+
+	async function refresh(): Promise<void> {
+		try {
+			absorb(await engine.status());
+		} catch {
+			// Keep the last view; the next tick tries again.
+		} finally {
+			scheduleFleet();
+		}
+	}
 
 	const port: QueuePort = {
 		persist: (state) => pi.appendEntry(ENTRY_TYPE, state),
@@ -56,17 +105,13 @@ export default function wrangle(pi: ExtensionAPI) {
 				{ triggerTurn: true, deliverAs: "followUp" },
 			);
 		},
-		render: (tickets) => {
-			if (context?.hasUI) {
-				const lines = widgetLines(tickets);
-				context.ui.setWidget(WIDGET_ID, lines.length ? lines : undefined, {
-					placement: "aboveEditor",
-				});
-			}
+		render: (current) => {
+			tickets = current;
+			paint();
 			const pane = process.env["HERDR_PANE_ID"];
-			if (pane && tickets.length !== lastCount) {
-				lastCount = tickets.length;
-				void engine.queue(pane, tickets.length).catch(() => undefined);
+			if (pane && current.length !== lastCount) {
+				lastCount = current.length;
+				void engine.queue(pane, current.length).catch(() => undefined);
 			}
 		},
 	};
@@ -74,13 +119,24 @@ export default function wrangle(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		context = ctx;
+		let restored = false;
 		for (const entry of [...ctx.sessionManager.getBranch()].reverse()) {
-			if (entry.type !== "custom" || entry.customType !== ENTRY_TYPE) continue;
-			if (isQueueState(entry.data)) queue.restore(entry.data);
-			break;
+			if (entry.type !== "custom") continue;
+			if (entry.customType === LEAD_ENTRY && leadId === undefined && isLeadEntry(entry.data)) {
+				leadId = entry.data.lead;
+			}
+			if (entry.customType === ENTRY_TYPE && !restored && isQueueState(entry.data)) {
+				queue.restore(entry.data);
+				restored = true;
+			}
 		}
+		// Only a session that has used wrangle pays for a fleet probe.
+		if (leadId !== undefined || tickets.length > 0) void refresh();
 	});
-	pi.on("session_shutdown", () => queue.stop());
+	pi.on("session_shutdown", () => {
+		queue.stop();
+		stopFleet();
+	});
 
 	pi.registerTool({
 		name: "wrangle",
@@ -100,6 +156,8 @@ export default function wrangle(pi: ExtensionAPI) {
 					case "status": {
 						const status = await engine.status(signal);
 						port.render(queue.list());
+						absorb(status);
+						scheduleFleet();
 						return {
 							content: [{ type: "text", text: renderStatus(status, queue.list()) }],
 							details: status as unknown as Record<string, unknown>,
@@ -114,6 +172,17 @@ export default function wrangle(pi: ExtensionAPI) {
 					case "spawn": {
 						const params = withStored(input, input.ticket ? queue.find(input.ticket) : undefined);
 						const outcome = await runSpawn(engine, ctx, params, self(), signal);
+						const label = params.label ?? params.name ?? params.agent_type ?? "child";
+						if (outcome.claimed && outcome.claimed.lead !== leadId) {
+							leadId = outcome.claimed.lead;
+							pi.appendEntry(LEAD_ENTRY, { lead: leadId, repo: outcome.claimed.repo });
+						}
+						if (outcome.leadExists) {
+							void engine.notify(
+								"wrangle: lead exists",
+								`${label} not spawned: ${outcome.leadExists.repo} is led from ${outcome.leadExists.pane}`,
+							);
+						}
 						if (outcome.queued) {
 							const existing = queue.find(outcome.queued.ticket);
 							if (existing) queue.requeue(existing.ticket, outcome.queued.reason);
@@ -126,7 +195,16 @@ export default function wrangle(pi: ExtensionAPI) {
 							}
 						} else if (outcome.admitted) {
 							queue.remove(outcome.admitted.ticket);
+							if (!outcome.result.isError) {
+								const a = outcome.admitted;
+								void engine.notify(
+									"wrangle: spawned",
+									`${label} → ${a.host.label} (headroom ${a.headroom.headroom.toFixed(1)})`,
+								);
+							}
 						}
+						// Show the new child (or the queued ticket) without waiting for the timer.
+						void refresh();
 						return outcome.result;
 					}
 				}
@@ -155,7 +233,24 @@ export function ticketFrom(params: WrangleParams, ticket: string, reason: string
 	return { ticket, params: rest, createdAt: Date.now(), state: "queued", reason };
 }
 
+export function isLeadEntry(value: unknown): value is { lead: string; repo?: string } {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		typeof (value as { lead?: unknown }).lead === "string"
+	);
+}
+
 export function renderStatus(status: Status, mine: readonly Ticket[] = []): string {
+	const leadLines = (status.leads ?? []).flatMap((l) => {
+		const head = l.pane
+			? `⌂ ${l.repo ?? l.lead} ${l.pane} on ${l.host ?? "?"} (${l.status ?? "unknown"})`
+			: `? ${l.lead} (no lead pane)`;
+		return [
+			`${head} · ${l.children.length} children`,
+			...l.children.map((c) => `  ↳ ${c.name} ${c.status} ${c.pane} on ${c.host}`),
+		];
+	});
 	const lines = status.hosts.map((host) => {
 		const probe = host.probe;
 		const load =
@@ -164,6 +259,7 @@ export function renderStatus(status: Status, mine: readonly Ticket[] = []): stri
 				: ` load ${probe.load1.toFixed(2)}/${probe.cores} disk ${probe.disk_free_percent.toFixed(0)}% agents ${probe.agents.total} reserved ${probe.reservations.length}`;
 		return `${hostLine(host)}${load}`;
 	});
+	lines.unshift(...(leadLines.length ? leadLines : ["leads: none"]));
 	if (status.queue.length === 0) lines.push("queue: empty");
 	const own = new Set(mine.map((t) => t.ticket));
 	for (const entry of status.queue) {

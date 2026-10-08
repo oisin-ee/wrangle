@@ -3,7 +3,7 @@
 
 import type { Engine } from "./engine.ts";
 import { message } from "./spawn.ts";
-import type { WrangleParams } from "./types.ts";
+import type { Child, HostReport, LeadView, WrangleParams } from "./types.ts";
 
 export const ENTRY_TYPE = "wrangle-queue";
 export const MESSAGE_TYPE = "wrangle";
@@ -182,6 +182,58 @@ export function shortReason(reason: string): string {
 		})
 		.filter(Boolean)
 		.join(", ");
+}
+
+/** What the fleet widget shows: this session's lead (if it holds one) and the hosts. */
+export interface FleetView {
+	lead?: LeadView;
+	hosts: readonly HostReport[];
+}
+
+/** "2 working 1 idle", in a stable order. */
+export function tallyChildren(children: readonly Child[]): string {
+	const counts = new Map<string, number>();
+	for (const c of children) counts.set(c.status, (counts.get(c.status) ?? 0) + 1);
+	return [...counts.entries()]
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([status, n]) => `${n} ${status}`)
+		.join(" ");
+}
+
+/** "local 5.7 netcup 19.3 momokaya-2 down". */
+export function hostsLine(hosts: readonly HostReport[]): string {
+	return hosts
+		.map((h) => {
+			if (!h.ok || !h.headroom) return `${h.label} down`;
+			return h.headroom.eligible ? `${h.label} ${h.headroom.headroom.toFixed(1)}` : `${h.label} full`;
+		})
+		.join(" ");
+}
+
+/** Children that still hold a pane and may run. */
+export function liveChildren(view: FleetView | undefined): number {
+	return view?.lead?.children.filter((c) => c.status !== "done").length ?? 0;
+}
+
+/**
+ * The lead's widget: one header line while this session holds a lead or has
+ * tickets, then one line per queued ticket. Empty when there is nothing.
+ */
+export function fleetLines(
+	view: FleetView | undefined,
+	tickets: readonly Ticket[],
+	now = Date.now(),
+): string[] {
+	const lead = view?.lead;
+	if (!lead && tickets.length === 0) return [];
+	const parts: string[] = [`⌂ ${lead?.repo ?? "wrangle"}`];
+	if (lead) {
+		const n = lead.children.length;
+		parts.push(n === 0 ? "no children" : `${n} ${n === 1 ? "child" : "children"}: ${tallyChildren(lead.children)}`);
+	}
+	parts.push(`${tickets.filter((t) => t.state === "queued").length} queued`);
+	if (view && view.hosts.length) parts.push(hostsLine(view.hosts));
+	return [parts.join(" · "), ...widgetLines(tickets, now)];
 }
 
 /** Widget lines, one per ticket; empty when nothing is queued. */

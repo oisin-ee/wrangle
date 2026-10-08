@@ -76,6 +76,9 @@ pub enum Command {
         /// Seconds between refreshes with --watch.
         #[arg(long, default_value_t = 5)]
         interval: u64,
+        /// Print the Herdr sidebar rows that render the wrangle marks, and exit.
+        #[arg(long, conflicts_with = "watch")]
+        sidebar: bool,
     },
     /// Drop a queued ticket and any reservation it holds.
     Cancel {

@@ -60,6 +60,9 @@ fn print<T: Serialize>(json: bool, value: &T, text: impl FnOnce() -> String) -> 
     Ok(())
 }
 
+/// The Herdr `[ui.sidebar.agents]` block that renders the wrangle marks.
+const SIDEBAR: &str = include_str!("../herdr-sidebar.toml");
+
 fn home() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
 }
@@ -129,7 +132,14 @@ fn lead(cmd: Command, fleet: &Fleet, json: bool) -> Result<ExitCode> {
             print(json, &out, || format!("released {}\n", out.released))?;
             Ok(ExitCode::SUCCESS)
         }
-        Command::Status { watch, interval } => {
+        Command::Status { sidebar: true, .. } => {
+            let body = serde_json::json!({ "sidebar": SIDEBAR });
+            print(json, &body, || SIDEBAR.to_string())?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Status {
+            watch, interval, ..
+        } => {
             loop {
                 let st = commands::status(fleet)?;
                 if watch && !json {

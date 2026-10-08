@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Engine, type Raw, type Runner } from "./engine.ts";
-import { ticketFrom, withStored } from "./index.ts";
-import { Queue, type QueuePort, type QueueState, type Ticket, wakeText, widgetLines } from "./queue.ts";
+import { isLeadEntry, renderStatus, ticketFrom, withStored } from "./index.ts";
+import {
+	fleetLines,
+	hostsLine,
+	liveChildren,
+	Queue,
+	type QueuePort,
+	type QueueState,
+	type Ticket,
+	wakeText,
+	widgetLines,
+} from "./queue.ts";
 
 const HOST = { id: "local", label: "local" };
 const ADMITTED = (ticket: string) => ({
@@ -172,4 +182,66 @@ test("withStored fills missing arguments from the ticket; explicit ones win", ()
 	});
 	assert.equal(withStored({ ticket: "t1", message: "new" }, stored).message, "new");
 	assert.deepEqual(withStored({ ticket: "t1" }, undefined), { ticket: "t1" });
+});
+
+test("fleetLines: lead header with children, queue, and host headroom; empty without lead or tickets", () => {
+	const hosts = [
+		{ id: "local", label: "local", ok: true, headroom: { host: "local", headroom: 5.67, eligible: true, live_agents: 6 } },
+		{ id: "8103", label: "netcup", ok: true, headroom: { host: "8103", headroom: -1, eligible: false, live_agents: 9 } },
+		{ id: "08c2", label: "momokaya-2", ok: false, error: "ssh" },
+	];
+	assert.equal(hostsLine(hosts), "local 5.7 netcup full momokaya-2 down");
+	const lead = {
+		lead: "lead:rondo",
+		repo: "rondo",
+		pane: "w42:p1",
+		children: [
+			{ pane: "w42:pX", host: "local", name: "a", status: "working" },
+			{ pane: "w3:p2", host: "netcup", name: "b", status: "idle" },
+			{ pane: "w42:pY", host: "local", name: "c", status: "working" },
+		],
+	};
+	assert.deepEqual(fleetLines({ lead, hosts }, []), [
+		"⌂ rondo · 3 children: 1 idle 2 working · 0 queued · local 5.7 netcup full momokaya-2 down",
+	]);
+	assert.equal(liveChildren({ lead, hosts }), 3);
+	assert.equal(
+		fleetLines({ lead: { ...lead, children: [] }, hosts: [] }, [])[0],
+		"⌂ rondo · no children · 0 queued",
+	);
+	assert.deepEqual(fleetLines({ hosts }, []), []);
+	assert.deepEqual(fleetLines(undefined, []), []);
+	const t: Ticket = {
+		ticket: "w-1",
+		params: { label: "unit" },
+		createdAt: 1_000,
+		state: "queued",
+	};
+	assert.deepEqual(fleetLines(undefined, [t], 11_000), ["⌂ wrangle · 1 queued", "wrangle w-1 unit: queued 10s"]);
+});
+
+test("renderStatus lists leads with children before the hosts", () => {
+	const text = renderStatus({
+		leads: [
+			{
+				lead: "lead:rondo",
+				repo: "rondo",
+				pane: "w42:p1",
+				host: "local",
+				status: "working",
+				children: [{ pane: "w42:pX", host: "local", name: "kid", status: "idle" }],
+			},
+			{ lead: "w42:pP", children: [] },
+		],
+		hosts: [{ id: "local", label: "local", ok: false, error: "x" }],
+		queue: [],
+	});
+	const lines = text.split("\n");
+	assert.equal(lines[0], "⌂ rondo w42:p1 on local (working) · 1 children");
+	assert.equal(lines[1], "  ↳ kid idle w42:pX on local");
+	assert.equal(lines[2], "? w42:pP (no lead pane) · 0 children");
+	assert.match(lines[3] ?? "", /^local: unreachable/);
+	assert.equal(renderStatus({ hosts: [], queue: [] }).split("\n")[0], "leads: none");
+	assert.equal(isLeadEntry({ lead: "lead:rondo" }), true);
+	assert.equal(isLeadEntry({}), false);
 });

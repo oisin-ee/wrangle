@@ -1,0 +1,16 @@
+# wrangle marks in the Herdr sidebar. Paste into ~/.config/herdr/config.toml,
+# then run `herdr server reload-config`. Print this with `wrangle status --sidebar`.
+#
+#   ⌂ <repo>   the lead pane for a repository (blue)
+#   ↳ <name>   a child (red), with ● after the state icon
+#   $lead      the lead that owns a child (dim)
+#   $queue     "N queued" on a lead that waits for headroom (yellow)
+[ui.sidebar.agents]
+rows = [
+  ["state_icon", { token = "$sub", fg = "#f38ba8", bold = true }, "machine", "workspace"],
+  [
+    { token = "agent", rules = [{ starts_with = "↳", fg = "#f38ba8" }, { starts_with = "⌂", fg = "#89b4fa", bold = true }] },
+    { token = "$lead", dim = true },
+    { token = "$queue", fg = "#f9e2af", bold = true },
+  ],
+]
