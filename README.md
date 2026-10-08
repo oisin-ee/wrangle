@@ -2,7 +2,7 @@
 
 Admit, queue, and spawn coding agents across [Herdr](https://herdr.dev) hosts.
 
-Three lead agents that spawn children on the same machines race each other and
+Lead agents that spawn children on the same machines race each other and
 over-commit a host. `wrangle` is the shared gate. It probes every host, reserves
 a slot on the host with the most headroom, and either spawns there or hands back
 a queue ticket. The lead never picks a host and never polls.
@@ -27,7 +27,7 @@ with fewer live agents.
 
 An admitted call holds a reservation on that host for `reservation_ttl_ms`
 (3 minutes). Each reservation counts as one extra unit of load, so a burst of
-admits from three leads spreads out instead of landing on one host. The
+admits from several leads spreads out instead of landing on one host. The
 reservation is attached to the child's pane after the spawn. It ends at the TTL
 or when the pane closes.
 

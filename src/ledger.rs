@@ -67,7 +67,7 @@ pub fn default_dir() -> PathBuf {
 }
 
 /// A fresh ticket id: `w-<unix ms, base 36>-<4 hex>`. Unique enough across
-/// three leads; the lock serialises writers on one host.
+/// concurrent leads; the lock serialises writers on one host.
 #[must_use]
 pub fn new_ticket() -> String {
     let ms = now_ms();
