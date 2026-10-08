@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-08
+
+- One lead per repository. The first spawn from a Herdr pane claims the lead for the pane's
+  repository (`⌂ <repo>`, tokens `role=lead`, `repo=`). A second live lead is refused with
+  `lead_exists` before anything is admitted; `take_over=true` / `--take-over` moves it.
+  New command `wrangle lead`.
+- Children carry `lead=lead:<repo>` instead of `owner=`. `wrangle status` lists every lead with
+  its children before the hosts; older `owner=` children are grouped too.
+- Layout is no longer a choice: the Pi tool drops `placement`, `workspace`, and `pane`, and the
+  CLI drops `--workspace`. A child with a branch opens in its worktree; any other child opens as
+  a tab in the lead's workspace (a new workspace on a remote host). `spawn --lead` is optional
+  inside Herdr.
+- Pi widget shows the session's lead, its children by status, the queue, and host headroom;
+  refreshes on every call and every 60 s while work runs. Toasts on spawn and on `lead_exists`.
+- `wrangle status --sidebar` prints the Herdr sidebar rows (`herdr-sidebar.toml`).
+
 ## 0.1.1 - 2026-10-08
 
 - Herdr plugin: `pane.closed` and `pane.exited` release the pane's reservation; a `board`
