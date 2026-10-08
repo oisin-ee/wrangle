@@ -13,7 +13,7 @@ import {
 	wakeText,
 	widgetLines,
 } from "./queue.ts";
-import { hostLine, leadName, message, runSpawn, toolError, toolResult } from "./spawn.ts";
+import { hostLine, message, runSpawn, self, toolError, toolResult } from "./spawn.ts";
 import { type Status, WrangleParameters, type WrangleParams } from "./types.ts";
 
 export const WIDGET_ID = "wrangle";
@@ -22,9 +22,13 @@ export const HELP = `wrangle: spawn child agents without picking a host.
 
 Calls (action defaults to spawn):
   wrangle agent_type=… label=… message=… [branch=… base=… repo=…] [machine=…]
+    Claims this repo's lead for your session (⌂ <repo> in the sidebar).
+    One lead per repo: when another session holds it, the call returns
+    lead_exists with that pane. Then send the unit to that lead with
+    agents send; pass take_over=true only when the user asks.
     Admits on the host with the most headroom, runs the prepare hook when
-    branch is set (a worktree and pane on that host), then Shepherdr's
-    agents spawn. Returns Shepherdr's spawn result plus host and ticket.
+    branch is set (a worktree and pane on that host), else opens a tab in
+    your workspace. Returns Shepherdr's spawn result plus host and ticket.
     When every host is full it returns {queued, ticket} at once; a wrangle
     message arrives when the ticket is admitted. Then call
     wrangle ticket=<ticket>; the stored arguments are reused. Never poll.
@@ -109,7 +113,7 @@ export default function wrangle(pi: ExtensionAPI) {
 					}
 					case "spawn": {
 						const params = withStored(input, input.ticket ? queue.find(input.ticket) : undefined);
-						const outcome = await runSpawn(engine, ctx, params, leadName(), signal);
+						const outcome = await runSpawn(engine, ctx, params, self(), signal);
 						if (outcome.queued) {
 							const existing = queue.find(outcome.queued.ticket);
 							if (existing) queue.requeue(existing.ticket, outcome.queued.reason);

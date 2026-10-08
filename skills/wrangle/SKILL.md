@@ -5,7 +5,9 @@ description: Orchestrate parallel coding agents across Herdr hosts with the wran
 
 # wrangle
 
-`wrangle` picks the host for each child, reserves a slot there, and spawns through Shepherdr. When every host is full, it gives you a ticket and wakes you when the ticket is admitted. You never pick a host, read load, or poll.
+`wrangle` picks the host for each child, reserves a slot there, and spawns through Shepherdr. When every host is full, it gives you a ticket and wakes you when the ticket is admitted. You never pick a host, a layout, read load, or poll.
+
+One lead per repository. Your first `wrangle` call claims the lead for your repository: your pane shows `⌂ <repo>` in the Herdr sidebar, and every child shows `↳ <name>`. Children without a branch open as tabs in your workspace. Children with a branch open in their worktree's workspace.
 
 ## Procedure
 
@@ -22,6 +24,7 @@ description: Orchestrate parallel coding agents across Herdr hosts with the wran
 3. Read the result:
    - `spawned`: note `name`, `target`, and `host`. The child runs. Continue with the next unit.
    - `queued`: note `ticket`. Continue with other work or end your turn. A `wrangle` message arrives when the ticket is admitted. Then call `wrangle ticket=<ticket>`. The stored arguments are reused.
+   - `lead_exists`: another session leads this repository. Do not spawn. Send the unit to that lead with `agents send` (its `pane` and `name` are in the result), or tell the user. Pass `take_over=true` only when the user asks for it.
    - `isError`: read the text. Correct the call, or report the blocker.
 
 4. Do not call `wrangle` again for the same ticket before the wake-up message. Do not call `wrangle action=status` in a loop. One `status` call is fine when you report.
@@ -30,15 +33,17 @@ description: Orchestrate parallel coding agents across Herdr hosts with the wran
 
 6. After you merge or drop a unit, remove its worktree with the repository's remove task (`agent:worktree-remove` in a repository that uses the agent harness). The reservation ends when the pane closes or when its TTL ends.
 
-7. Leave panes marked `↳` alone unless the `owner` token names you. They belong to another lead.
+7. Leave panes marked `↳` alone unless their `lead` token names your lead (`lead:<repo>`). They belong to another lead. `wrangle action=status` lists every lead with its children.
 
 ## Without the Pi tool
 
 In a shell (Claude Code, Codex, a script), the CLI does the same work:
 
 ```
-wrangle spawn --lead <your-name> --kind claude --name unit-a --message "<task>" --branch feat/unit-a --base main --json
+wrangle spawn --kind claude --name unit-a --message "<task>" --branch feat/unit-a --base main --json
 ```
+
+Inside Herdr, omit `--lead`: the spawn claims the repository's lead on `$HERDR_PANE_ID`. If another pane holds it, the spawn fails with exit 2 and names that pane; `wrangle lead` (exit 1, `lead_exists`) shows the same without spawning. Outside Herdr, pass `--lead <your-name>`.
 
 Exit 0 prints `{"spawned": true, "pane_id": …, "name": …}`. Exit 1 prints `{"queued": true, "ticket": …}`. If the exit code is 1, retry later with `wrangle spawn --ticket <ticket>` and the same arguments. `wrangle status` shows every host and your queue. Then follow the child with `herdr [--machine <id>] agent read <name>` and `herdr [--machine <id>] agent prompt <name> "<text>"`.
 
@@ -47,5 +52,6 @@ If `status` is `blocked`, the child sits on a startup dialog. Read its pane, ans
 ## Rules
 
 - `machine` is a resource pin, not a work-to-host mapping. `wrangle` balances the hosts.
+- There is no `placement` or `workspace` argument. The layout follows from `branch`.
 - Every writer gets its own branch. The `prepare` hook makes the worktree on the admitted host.
 - Give the child one unit, its allowed files, its verification command, and commit authority. Do not give it the transcript.

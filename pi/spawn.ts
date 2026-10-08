@@ -4,10 +4,19 @@
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
 import { Engine } from "./engine.ts";
-import { type Admitted, type Queued, SpawnDetails, type WrangleParams } from "./types.ts";
+import {
+	type Admitted,
+	type Claimed,
+	type LeadExists,
+	type Queued,
+	SpawnDetails,
+	type WrangleParams,
+} from "./types.ts";
 
 /** The slice of `ExtensionToolContext` the flow needs; narrow so tests can fake it. */
 export interface SpawnContext {
+	/** The session's working directory: the repo whose lead this session claims. */
+	cwd?: string;
 	executeTool(
 		name: string,
 		args: unknown,
@@ -34,12 +43,28 @@ export function required(value: string | undefined, field: string): string {
 	return value.trim();
 }
 
-/** The lead's identity for the ledger and the sidebar `owner` token. */
+/** The lead's identity outside Herdr, where no pane can claim a repo. */
 export function leadName(env: NodeJS.ProcessEnv = process.env): string {
 	return env["WRANGLE_LEAD"] ?? env["HERDR_PANE_ID"] ?? `pi-${process.pid}`;
 }
 
-/** Shepherdr `agents spawn` arguments, built from the tool call and the admitted host. */
+/** Who calls: this session's Herdr pane (claims the repo's lead) and a fallback name. */
+export interface Self {
+	pane?: string;
+	fallback: string;
+}
+
+export function self(env: NodeJS.ProcessEnv = process.env): Self {
+	const pane = env["HERDR_PANE_ID"];
+	return pane ? { pane, fallback: leadName(env) } : { fallback: leadName(env) };
+}
+
+/**
+ * Shepherdr `agents spawn` arguments, built from the tool call and the admitted host.
+ * Layout is not a choice: a prepared worktree pane is pinned; anything else
+ * gets Shepherdr's default, a new tab in this lead's workspace on the local
+ * host or a new workspace on a remote one.
+ */
 export function spawnArguments(
 	params: WrangleParams,
 	host: string,
@@ -51,15 +76,12 @@ export function spawnArguments(
 		agent_type: required(params.agent_type, "agent_type"),
 		message: required(params.message, "message"),
 	};
-	for (const key of ["name", "label", "workspace", "cwd", "base", "blocking"] as const) {
+	for (const key of ["name", "label", "cwd", "base", "blocking"] as const) {
 		if (params[key] !== undefined) args[key] = params[key];
 	}
 	if (pane) {
 		args["placement"] = "pane";
 		args["pane"] = pane;
-	} else {
-		if (params.placement !== undefined) args["placement"] = params.placement;
-		if (params.pane !== undefined) args["pane"] = params.pane;
 	}
 	return args;
 }
@@ -68,6 +90,8 @@ export interface SpawnOutcome {
 	result: AgentToolResult<Details>;
 	admitted?: Admitted;
 	queued?: Queued;
+	leadExists?: LeadExists;
+	claimed?: Claimed;
 }
 
 /**
@@ -78,11 +102,27 @@ export async function runSpawn(
 	engine: Engine,
 	ctx: SpawnContext,
 	params: WrangleParams,
-	lead: string,
+	me: Self,
 	signal?: AbortSignal,
 ): Promise<SpawnOutcome> {
 	required(params.agent_type, "agent_type");
 	required(params.message, "message");
+	let lead = me.fallback;
+	let claimed: Claimed | undefined;
+	if (me.pane) {
+		const out = await engine.lead(
+			{ pane: me.pane, repo: params.repo ?? ctx.cwd ?? process.cwd(), takeOver: params.take_over === true },
+			signal,
+		);
+		if ("lead_exists" in out) {
+			return {
+				leadExists: out,
+				result: toolError(out.next, { ...out }),
+			};
+		}
+		claimed = out;
+		lead = out.lead;
+	}
 	const admit = await engine.admit(
 		params.ticket
 			? { ticket: params.ticket }
@@ -93,6 +133,7 @@ export async function runSpawn(
 	);
 	if ("queued" in admit) {
 		return {
+			...(claimed ? { claimed } : {}),
 			queued: admit,
 			result: toolResult({
 				queued: true,
@@ -162,9 +203,10 @@ export async function runSpawn(
 		await engine.release(admit.ticket).catch(() => undefined);
 	}
 	return {
+		...(claimed ? { claimed } : {}),
 		admitted: admit,
 		result: toolResult(
-			{ ...details, host: host.label, ticket: admit.ticket },
+			{ ...details, host: host.label, ticket: admit.ticket, lead },
 			warnings.length ? warnings.join("; ") : undefined,
 		),
 	};

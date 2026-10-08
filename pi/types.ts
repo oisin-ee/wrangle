@@ -7,9 +7,6 @@ import { type Static, Type } from "typebox";
 export const ACTIONS = ["spawn", "status", "cancel", "help"] as const;
 export type Action = (typeof ACTIONS)[number];
 
-/** Shepherdr's `agents spawn` placements (`src/launch.ts` START_PLACEMENTS). */
-export const PLACEMENTS = ["new_workspace", "new_tab", "pane"] as const;
-
 export const WrangleParameters = Type.Object(
 	{
 		action: Type.Optional(
@@ -25,9 +22,6 @@ export const WrangleParameters = Type.Object(
 		machine: Type.Optional(
 			Type.String({ description: "Pin to one host (id or label). Omit to balance across hosts." }),
 		),
-		placement: Type.Optional(StringEnum(PLACEMENTS)),
-		workspace: Type.Optional(Type.String()),
-		pane: Type.Optional(Type.String()),
 		cwd: Type.Optional(Type.String()),
 		blocking: Type.Optional(Type.Boolean({ description: "Passed to agents spawn unchanged" })),
 		base: Type.Optional(Type.String({ description: "Base ref for the worktree and review" })),
@@ -41,7 +35,15 @@ export const WrangleParameters = Type.Object(
 			}),
 		),
 		repo: Type.Optional(
-			Type.String({ description: "Repository for the prepare hook; default: this directory" }),
+			Type.String({
+				description: "Repository for the prepare hook and the lead claim; default: this directory",
+			}),
+		),
+		take_over: Type.Optional(
+			Type.Boolean({
+				description:
+					"Move this repo's lead to this session. Only after the user agrees: the other lead stops owning its children.",
+			}),
 		),
 	},
 	{ additionalProperties: false },
@@ -128,7 +130,26 @@ export const QueueStatus = Type.Object({
 	age_ms: Type.Number(),
 });
 
+export const Child = Type.Object({
+	pane: Type.String(),
+	host: Type.String(),
+	name: Type.String(),
+	status: Type.String(),
+});
+export type Child = Static<typeof Child>;
+
+export const LeadView = Type.Object({
+	lead: Type.String(),
+	repo: Type.Optional(Type.String()),
+	pane: Type.Optional(Type.String()),
+	host: Type.Optional(Type.String()),
+	status: Type.Optional(Type.String()),
+	children: Type.Array(Child),
+});
+export type LeadView = Static<typeof LeadView>;
+
 export const Status = Type.Object({
+	leads: Type.Optional(Type.Array(LeadView)),
 	hosts: Type.Array(HostReport),
 	queue: Type.Array(QueueStatus),
 });
@@ -164,6 +185,30 @@ export const Reported = Type.Object({
 	pane: Type.String(),
 	count: Type.Number(),
 });
+
+export const Claimed = Type.Object({
+	claimed: Type.Literal(true),
+	lead: Type.String(),
+	repo: Type.String(),
+	pane: Type.String(),
+	workspace_id: Type.Optional(Type.String()),
+	took_over: Type.Optional(Type.String()),
+});
+export type Claimed = Static<typeof Claimed>;
+
+export const LeadExists = Type.Object({
+	lead_exists: Type.Literal(true),
+	lead: Type.String(),
+	repo: Type.String(),
+	pane: Type.String(),
+	workspace_id: Type.Optional(Type.String()),
+	name: Type.Optional(Type.String()),
+	next: Type.String(),
+});
+export type LeadExists = Static<typeof LeadExists>;
+
+export const LeadOutput = Type.Union([Claimed, LeadExists]);
+export type LeadOutput = Static<typeof LeadOutput>;
 
 export const Failure = Type.Object({ error: Type.String() });
 

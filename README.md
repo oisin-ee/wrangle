@@ -35,6 +35,23 @@ When no host is eligible, the call returns at once with `queued: true` and a
 ticket. The ticket lives in the caller's queue. A later `admit --ticket` tries
 again from the same ticket, so the oldest request wins.
 
+## One lead per repository
+
+Each repository has one lead: the session that orchestrates its children.
+The first spawn from a Herdr pane claims the lead for the pane's repository
+(a linked worktree counts as its main repository). The pane gets
+`display_agent = "⌂ <repo>"` and the tokens `role=lead` and `repo=<repo>`.
+Children get `↳ <name>` and `lead=lead:<repo>`.
+
+When another live pane already leads the repository, the spawn stops before
+it admits anything and names that pane. Send the unit to that lead with
+`agents send`, or move the lead with `take_over=true` (CLI: `--take-over`).
+A lead pane whose agent is `done` does not count.
+
+The layout is not a choice. A child with a branch opens in the pane that the
+`prepare` hook makes. Any other child opens as a new tab in the lead's
+workspace on the local host, or in a new workspace on a remote host.
+
 Reservations live on the host they reserve, in
 `~/.local/state/wrangle/reservations.json` under a directory lock. Remote hosts
 run the same primitives over `ssh -T -o BatchMode=yes`. There is no daemon.
@@ -90,7 +107,8 @@ Every command accepts `--json`. Exit codes: 0 ok, 1 every host is full (the
 body carries the ticket), 2 error.
 
 ```sh
-wrangle status                      # hosts, headroom, reservations, queue
+wrangle status                      # leads and children, hosts, headroom, queue
+wrangle lead [--repo .] [--take-over]  # claim ⌂ <repo> on $HERDR_PANE_ID; exit 1 when held
 wrangle probe [--machine netcup]    # the raw per-host numbers
 wrangle admit --lead main-verify    # reserve a slot; exit 1 with a ticket when full
 wrangle admit --ticket w-…          # try a queued ticket again
@@ -98,14 +116,15 @@ wrangle release --ticket w-…        # drop a reservation and its queue entry
 wrangle release --pane w3:p2        # drop the reservation attached to a pane
 wrangle cancel --ticket w-…         # release and dequeue; error when unknown
 wrangle prepare --branch feat/x --base main [--machine netcup] [--repo /path]
-wrangle mark --pane w3:p2 --lead main-verify --name reviewer [--ticket w-…]
-wrangle spawn --lead main-verify --kind claude --name unit-a --message "…" \
-  [--branch feat/x --base main] [--cwd /path] [--workspace w3] [--machine netcup]
+wrangle mark --pane w3:p2 --lead lead:rondo --name reviewer [--ticket w-…]
+wrangle spawn --kind claude --name unit-a --message "…" [--lead name | --take-over] \
+  [--branch feat/x --base main] [--repo /path] [--cwd /path] [--machine netcup]
 ```
 
 `spawn` is the whole flow for a harness that is not Pi. It admits or resumes a
-ticket and places a pane: the `prepare` hook with `--branch`, else a new tab or
-workspace. Then it runs `herdr agent start`, marks the pane, and runs
+ticket and places a pane: the `prepare` hook with `--branch`, else a new tab
+in the lead's workspace. Without `--lead` it first claims the lead on
+`$HERDR_PANE_ID`. Then it runs `herdr agent start`, marks the pane, and runs
 `herdr agent prompt`. It prints
 `{"spawned": true, "pane_id": …, "name": …, "status": "working"}`. When the
 agent stops on a startup dialog, `status` is `blocked` and `next` says what to
@@ -124,12 +143,14 @@ the usual call is:
 wrangle agent_type=general label="unit a" message="…" branch=feat/unit-a base=main
 ```
 
-The tool admits. When `branch` is set, it runs the `prepare` hook on the
+The tool claims the repository's lead (see "One lead per repository"), then
+admits. When `branch` is set, it runs the `prepare` hook on the
 admitted host. Then it calls `agents spawn` on that host with the same
 arguments. The result
 is Shepherdr's spawn result plus `host` and `ticket`. Pass-through fields:
-`agent_type`, `name`, `label`, `message`, `machine`, `placement`, `workspace`,
-`pane`, `cwd`, `base`, `blocking`.
+`agent_type`, `name`, `label`, `message`, `machine`, `cwd`, `base`, `blocking`.
+There is no `placement`, `workspace`, or `pane`: the layout follows from
+`branch`. A `lead_exists` result is an error that names the other lead.
 
 When every host is full the tool returns `{queued, ticket, reason, hosts}` at
 once. The ticket is persisted in the session, listed in a widget above the
@@ -144,7 +165,8 @@ Other actions: `wrangle action=status`, `wrangle action=cancel ticket=…`,
 ## Sidebar marks
 
 The tool reports metadata on each child pane: `display_agent` becomes
-`↳ <name>`, the `sub` token is `●`, and the `owner` token names the lead. The
+`↳ <name>`, the `sub` token is `●`, and the `lead` token names the lead. The
+lead's pane shows `⌂ <repo>`. The
 lead's own pane gets `queue = "N queued"` while it has tickets. Herdr keeps
 this metadata until it restarts; the tool reports it again on every call.
 
@@ -155,8 +177,8 @@ To show the marks, add rows to your Herdr `config.toml`:
 rows = [
   ["state_icon", { token = "$sub", fg = "#f38ba8", bold = true }, "machine", "workspace"],
   [
-    { token = "agent", rules = [{ starts_with = "↳", fg = "#f38ba8" }] },
-    { token = "$owner", dim = true },
+    { token = "agent", rules = [{ starts_with = "↳", fg = "#f38ba8" }, { starts_with = "⌂", fg = "#89b4fa", bold = true }] },
+    { token = "$lead", dim = true },
     { token = "$queue", fg = "#f9e2af", bold = true },
   ],
 ]
@@ -182,7 +204,8 @@ PATH, then through `mise x`, so install the binary first.
 ## Skill
 
 `skills/wrangle/SKILL.md` is the procedure a lead follows. It splits units and
-calls `wrangle` once per unit without a host. It handles `spawned` and
+calls `wrangle` once per unit without a host. It sends units to the existing
+lead when `wrangle` reports `lead_exists`. It handles `spawned` and
 `queued`, uses `agents` for everything after the spawn, and cleans up after the
 merge. Pi loads it
 from the package. For other harnesses, symlink the directory into

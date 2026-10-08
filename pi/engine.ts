@@ -8,6 +8,7 @@ import {
 	AdmitOutput,
 	Cancelled,
 	Failure,
+	LeadOutput,
 	Marked,
 	Prepared,
 	Released,
@@ -106,6 +107,13 @@ export class Engine {
 		else throw new EngineError("admit needs a lead or a ticket", "invalid");
 		if (options.machine) args.push("--machine", options.machine);
 		return this.exec(AdmitOutput, args, signal);
+	}
+
+	/** Claim this repo's lead on `pane`; exit 1 carries `lead_exists`. */
+	lead(options: { pane: string; repo: string; takeOver?: boolean }, signal?: AbortSignal) {
+		const args = ["lead", "--repo", options.repo, "--pane", options.pane];
+		if (options.takeOver) args.push("--take-over");
+		return this.exec(LeadOutput, args, signal);
 	}
 
 	release(ticket: string, signal?: AbortSignal) {
