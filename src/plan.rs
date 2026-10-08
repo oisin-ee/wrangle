@@ -108,6 +108,7 @@ mod tests {
                     pane: None,
                 })
                 .collect(),
+            panes: Vec::new(),
         }
     }
 

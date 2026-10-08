@@ -26,6 +26,55 @@ impl AgentCounts {
     }
 }
 
+/// One Herdr pane that carries wrangle tokens: a lead (`role=lead`) or a
+/// child (`lead=` or the older `owner=`). Other panes are not reported.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pane {
+    #[serde(default)]
+    pub pane_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_status: Option<String>,
+    #[serde(default)]
+    pub tokens: BTreeMap<String, String>,
+}
+
+impl Pane {
+    #[must_use]
+    pub fn token(&self, key: &str) -> Option<&str> {
+        self.tokens.get(key).map(String::as_str)
+    }
+
+    /// The repository this pane leads, when it carries `role=lead`.
+    #[must_use]
+    pub fn lead_repo(&self) -> Option<&str> {
+        (self.token("role") == Some("lead"))
+            .then(|| self.token("repo"))
+            .flatten()
+    }
+
+    /// The lead that owns this child: `lead=`, else the older `owner=`.
+    #[must_use]
+    pub fn owner(&self) -> Option<&str> {
+        self.token("lead").or_else(|| self.token("owner"))
+    }
+
+    #[must_use]
+    pub fn is_done(&self) -> bool {
+        self.agent_status.as_deref() == Some("done")
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.pane_id)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Probe {
     /// `local` or the Herdr machine id.
@@ -36,6 +85,10 @@ pub struct Probe {
     pub disk_free_percent: f64,
     pub agents: AgentCounts,
     pub reservations: Vec<Reservation>,
+    /// Leads and children on this host. Empty from a host that runs an
+    /// older `wrangle`.
+    #[serde(default)]
+    pub panes: Vec<Pane>,
 }
 
 /// Measure this machine. `home` is the filesystem the disk rule watches.
@@ -47,14 +100,16 @@ pub fn local(
     label: &str,
     home: &str,
 ) -> Result<Probe> {
+    let list = agent_list(shell)?;
     Ok(Probe {
         host: host.to_string(),
         label: label.to_string(),
         load1: load1(shell)?,
         cores: cores(),
         disk_free_percent: disk_free_percent(shell, home)?,
-        agents: agents(shell)?,
+        agents: list.counts,
         reservations: ledger.reservations(ttl_ms)?,
+        panes: list.panes,
     })
 }
 
@@ -113,41 +168,52 @@ pub fn parse_df(text: &str) -> Option<f64> {
     Some(available / total * 100.0)
 }
 
-pub fn agents(shell: &dyn Shell) -> Result<AgentCounts> {
+/// `herdr agent list` on this host, counted and filtered to wrangle panes.
+pub fn agent_list(shell: &dyn Shell) -> Result<AgentList> {
     let out = shell.run_ok("herdr", &["agent".to_string(), "list".to_string()])?;
     parse_agent_list(&out.stdout)
 }
 
-#[derive(Deserialize)]
-struct AgentList {
-    result: AgentListResult,
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentList {
+    pub counts: AgentCounts,
+    /// Only panes with a `role`, `lead`, or `owner` token.
+    pub panes: Vec<Pane>,
 }
 
 #[derive(Deserialize)]
-struct AgentListResult {
+struct RawList {
+    result: RawListResult,
+}
+
+#[derive(Deserialize)]
+struct RawListResult {
     #[serde(default)]
-    agents: Vec<AgentRow>,
+    agents: Vec<Pane>,
 }
 
-#[derive(Deserialize)]
-struct AgentRow {
-    #[serde(default)]
-    agent_status: Option<String>,
-}
+const WRANGLE_TOKENS: [&str; 3] = ["role", "lead", "owner"];
 
-/// Count agents in `herdr agent list` JSON (`{"result":{"agents":[…]}}`).
-pub fn parse_agent_list(text: &str) -> Result<AgentCounts> {
-    let list: AgentList = serde_json::from_str(text).map_err(|e| Error::Parse {
+/// Parse `herdr agent list` JSON (`{"result":{"agents":[…]}}`): count every
+/// agent by status and keep the panes that carry wrangle tokens.
+pub fn parse_agent_list(text: &str) -> Result<AgentList> {
+    let list: RawList = serde_json::from_str(text).map_err(|e| Error::Parse {
         origin: "herdr agent list".to_string(),
         detail: e.to_string(),
     })?;
-    let mut counts = AgentCounts::default();
+    let mut out = AgentList::default();
     for row in list.result.agents {
-        counts.total += 1;
-        let status = row.agent_status.unwrap_or_else(|| "unknown".to_string());
-        *counts.by_status.entry(status).or_insert(0) += 1;
+        out.counts.total += 1;
+        let status = row
+            .agent_status
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        *out.counts.by_status.entry(status).or_insert(0) += 1;
+        if WRANGLE_TOKENS.iter().any(|k| row.tokens.contains_key(*k)) {
+            out.panes.push(row);
+        }
     }
-    Ok(counts)
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -181,11 +247,34 @@ mod tests {
             {"agent":"pi","agent_status":"working","pane_id":"w1:p3"},
             {"agent":"claude","pane_id":"w1:p4"}
         ],"type":"agent_list"}}"#;
-        let c = parse_agent_list(text).unwrap();
+        let c = parse_agent_list(text).unwrap().counts;
         assert_eq!(c.total, 4);
         assert_eq!(c.by_status["idle"], 1);
         assert_eq!(c.by_status["unknown"], 1);
         assert_eq!(c.live(), 3);
+    }
+
+    #[test]
+    fn agent_list_keeps_leads_and_children_only() {
+        let text = r#"{"result":{"agents":[
+            {"agent":"pi","agent_status":"working","pane_id":"w42:p1","workspace_id":"w42",
+             "display_agent":"⌂ rondo","tokens":{"role":"lead","repo":"rondo"}},
+            {"agent":"pi","agent_status":"idle","pane_id":"w42:pX","workspace_id":"w42",
+             "name":"jalgpall-data","tokens":{"owner":"w42:pP","sub":"●"}},
+            {"agent":"pi","agent_status":"idle","pane_id":"w42:pY","name":"kid",
+             "tokens":{"lead":"lead:rondo","sub":"●"}},
+            {"agent":"pi","agent_status":"working","pane_id":"w42:p7"}
+        ]}}"#;
+        let list = parse_agent_list(text).unwrap();
+        assert_eq!(list.counts.total, 4);
+        let ids: Vec<&str> = list.panes.iter().map(|p| p.pane_id.as_str()).collect();
+        assert_eq!(ids, ["w42:p1", "w42:pX", "w42:pY"]);
+        assert_eq!(list.panes[0].lead_repo(), Some("rondo"));
+        assert_eq!(list.panes[0].workspace_id.as_deref(), Some("w42"));
+        assert_eq!(list.panes[1].owner(), Some("w42:pP"));
+        assert_eq!(list.panes[2].owner(), Some("lead:rondo"));
+        assert_eq!(list.panes[2].label(), "kid");
+        assert_eq!(list.panes[1].lead_repo(), None);
     }
 
     #[test]

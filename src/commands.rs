@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::herdr;
 use crate::hosts::{Fleet, Host, HostReport};
+use crate::lead::{self, LeadView};
 use crate::ledger::{QueueEntry, new_ticket, now_ms};
 use crate::plan::{Headroom, Plan, plan};
 use crate::probe::Probe;
@@ -65,6 +66,9 @@ pub struct QueueStatus {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Status {
+    /// Leads first: who orchestrates what, across every host.
+    #[serde(default)]
+    pub leads: Vec<LeadView>,
     pub hosts: Vec<HostReport>,
     pub queue: Vec<QueueStatus>,
 }
@@ -212,6 +216,7 @@ fn empty_probe(host: &Host) -> Probe {
         disk_free_percent: 0.0,
         agents: crate::probe::AgentCounts::default(),
         reservations: Vec::new(),
+        panes: Vec::new(),
     }
 }
 
@@ -290,6 +295,7 @@ pub fn status(fleet: &Fleet) -> Result<Status> {
         })
         .collect();
     Ok(Status {
+        leads: lead::leads(&reports),
         hosts: reports,
         queue,
     })
@@ -347,6 +353,7 @@ pub fn queue(fleet: &Fleet, pane: &str, count: usize) -> Result<Reported> {
 #[must_use]
 pub fn render_status(s: &Status) -> String {
     let mut out = String::new();
+    render_leads(&mut out, &s.leads);
     let _ = writeln!(
         out,
         "{:<12} {:>7} {:>5} {:>6} {:>6} {:>5} {:>8}  state",
@@ -412,6 +419,42 @@ pub fn render_status(s: &Status) -> String {
         }
     }
     out
+}
+
+fn render_leads(out: &mut String, leads: &[LeadView]) {
+    if leads.is_empty() {
+        let _ = writeln!(out, "leads: none\n");
+        return;
+    }
+    for l in leads {
+        let head = match (&l.repo, &l.pane) {
+            (Some(repo), Some(pane)) => format!(
+                "{} {repo}  {pane} on {} ({})",
+                herdr::LEAD_MARK,
+                l.host.as_deref().unwrap_or("?"),
+                l.status.as_deref().unwrap_or("unknown")
+            ),
+            _ => format!("? {}  (no lead pane)", l.lead),
+        };
+        let kids = if l.children.is_empty() {
+            "no children".to_string()
+        } else {
+            format!(
+                "{} children: {}",
+                l.children.len(),
+                lead::tally(&l.children)
+            )
+        };
+        let _ = writeln!(out, "{head} · {kids}");
+        for c in &l.children {
+            let _ = writeln!(
+                out,
+                "  ↳ {:<24} {:<10} {} on {}",
+                c.name, c.status, c.pane, c.host
+            );
+        }
+    }
+    out.push('\n');
 }
 
 #[cfg(test)]
@@ -522,7 +565,7 @@ mod tests {
         // mark attaches the pane and dequeues; cancel on a gone ticket fails.
         rig.shell.on(
             "herdr pane report-metadata w1:p2 --source wrangle --display-agent ↳ reviewer \
-             --token sub=● --token owner=lead-b",
+             --token sub=● --token lead=lead-b",
             "",
         );
         let marked = mark(
@@ -557,6 +600,19 @@ mod tests {
     #[test]
     fn render_status_shows_errors_and_queue() {
         let s = Status {
+            leads: vec![LeadView {
+                lead: "lead:rondo".into(),
+                repo: Some("rondo".into()),
+                pane: Some("w42:p1".into()),
+                host: Some("local".into()),
+                status: Some("working".into()),
+                children: vec![lead::ChildView {
+                    pane: "w42:pX".into(),
+                    host: "netcup".into(),
+                    name: "unit-a".into(),
+                    status: "idle".into(),
+                }],
+            }],
             hosts: vec![HostReport {
                 host: Host::local(),
                 ok: false,
@@ -577,6 +633,8 @@ mod tests {
             }],
         };
         let text = render_status(&s);
+        assert!(text.starts_with("⌂ rondo  w42:p1 on local (working) · 1 children: 1 idle\n"));
+        assert!(text.contains("  ↳ unit-a"));
         assert!(text.contains("error: herdr: no server"));
         assert!(text.contains("w-1"));
         assert!(text.contains("any"));

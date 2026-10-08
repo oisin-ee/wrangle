@@ -9,13 +9,18 @@ use crate::error::{Error, Result};
 use crate::herdr;
 use crate::hook::{self, HookInputs};
 use crate::hosts::{Fleet, Host};
+use crate::lead::{self, LeadOutput};
 
 #[derive(Debug, Clone)]
 pub struct SpawnRequest<'a> {
     /// Resume this queued ticket instead of admitting a new one.
     pub ticket: Option<&'a str>,
-    /// Who is spawning; required without a ticket.
+    /// Lead name. Without it (and without a ticket) the spawn claims the
+    /// lead for `repo` on `pane`.
     pub lead: Option<&'a str>,
+    /// `$HERDR_PANE_ID`: the pane that claims the lead.
+    pub pane: Option<&'a str>,
+    pub take_over: bool,
     /// Optional host pin.
     pub machine: Option<&'a str>,
     pub kind: &'a str,
@@ -26,7 +31,6 @@ pub struct SpawnRequest<'a> {
     pub base: Option<&'a str>,
     pub repo: Option<&'a str>,
     pub cwd: Option<&'a str>,
-    pub workspace: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,13 +56,47 @@ pub enum SpawnOutput {
     Queued(commands::Queued),
 }
 
-pub fn spawn(fleet: &Fleet, req: &SpawnRequest<'_>) -> Result<SpawnOutput> {
-    let lead = match (req.ticket, req.lead) {
-        (Some(_), _) => "",
-        (None, Some(l)) => l,
-        (None, None) => return Err(Error::Invalid("spawn needs --lead or --ticket".into())),
+/// Who spawns, and the workspace that holds the lead's children on this host.
+struct Owner {
+    lead: String,
+    workspace: Option<String>,
+}
+
+/// An explicit `--lead` wins. Otherwise claim the repo's lead on this pane;
+/// another live lead for the repo stops the spawn.
+fn owner(fleet: &Fleet, req: &SpawnRequest<'_>) -> Result<Owner> {
+    let workspace = req.pane.and_then(lead::workspace_of);
+    if let Some(l) = req.lead {
+        return Ok(Owner {
+            lead: l.to_string(),
+            workspace,
+        });
+    }
+    let Some(pane) = req.pane else {
+        if req.ticket.is_some() {
+            return Ok(Owner {
+                lead: String::new(),
+                workspace,
+            });
+        }
+        return Err(Error::Invalid(
+            "spawn needs --lead, --ticket, or a Herdr pane ($HERDR_PANE_ID) to claim the lead"
+                .into(),
+        ));
     };
-    let admitted = match commands::admit(fleet, lead, req.machine, req.ticket)? {
+    let repo = lead::repo_name(fleet.shell, req.repo)?;
+    match lead::claim(fleet.shell, &repo, pane, req.take_over)? {
+        LeadOutput::Claimed(c) => Ok(Owner {
+            lead: c.lead,
+            workspace: c.workspace_id.or(workspace),
+        }),
+        LeadOutput::Exists(e) => Err(Error::LeadExists(e.next)),
+    }
+}
+
+pub fn spawn(fleet: &Fleet, req: &SpawnRequest<'_>) -> Result<SpawnOutput> {
+    let owner = owner(fleet, req)?;
+    let admitted = match commands::admit(fleet, &owner.lead, req.machine, req.ticket)? {
         AdmitOutput::Queued(q) => return Ok(SpawnOutput::Queued(q)),
         AdmitOutput::Admitted(a) => *a,
     };
@@ -68,7 +106,7 @@ pub fn spawn(fleet: &Fleet, req: &SpawnRequest<'_>) -> Result<SpawnOutput> {
     let lead = admitted.lead.as_str();
 
     // A pane at a shell prompt on the admitted host.
-    let placed = match place(fleet, host, req) {
+    let placed = match place(fleet, host, req, owner.workspace.as_deref()) {
         Ok(p) => p,
         Err(e) => return Err(release_and(fleet, ticket, e)),
     };
@@ -133,8 +171,14 @@ struct Placed {
     location: Option<herdr::Location>,
 }
 
-/// The `prepare` hook when a branch is requested, else a new tab or workspace.
-fn place(fleet: &Fleet, host: &Host, req: &SpawnRequest<'_>) -> Result<Placed> {
+/// The `prepare` hook when a branch is requested. Else a new tab in the
+/// lead's workspace on this host, or a new workspace on a remote host.
+fn place(
+    fleet: &Fleet,
+    host: &Host,
+    req: &SpawnRequest<'_>,
+    lead_workspace: Option<&str>,
+) -> Result<Placed> {
     let cwd = std::env::current_dir()?.display().to_string();
     if let Some(branch) = req.branch {
         let inputs = HookInputs {
@@ -153,7 +197,7 @@ fn place(fleet: &Fleet, host: &Host, req: &SpawnRequest<'_>) -> Result<Placed> {
     let l = herdr::create_location(
         fleet.shell,
         host.machine(),
-        req.workspace,
+        lead_workspace.filter(|_| host.is_local()),
         req.cwd.unwrap_or(&cwd),
         label,
     )?;

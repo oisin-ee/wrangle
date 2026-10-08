@@ -10,6 +10,7 @@ mod error;
 mod herdr;
 mod hook;
 mod hosts;
+mod lead;
 mod ledger;
 mod node;
 mod plan;
@@ -84,6 +85,7 @@ fn lead(cmd: Command, fleet: &Fleet, json: bool) -> Result<ExitCode> {
             let reports = commands::probe(fleet, machine.as_deref())?;
             print(json, &reports, || {
                 commands::render_status(&commands::Status {
+                    leads: Vec::new(),
                     hosts: reports.clone(),
                     queue: Vec::new(),
                 })
@@ -141,6 +143,25 @@ fn lead(cmd: Command, fleet: &Fleet, json: bool) -> Result<ExitCode> {
                 std::thread::sleep(std::time::Duration::from_secs(interval.max(1)));
             }
             Ok(ExitCode::SUCCESS)
+        }
+        Command::Lead {
+            repo,
+            pane,
+            take_over,
+        } => {
+            let pane = pane
+                .or_else(|| std::env::var("HERDR_PANE_ID").ok())
+                .ok_or_else(|| Error::Invalid("lead needs --pane or $HERDR_PANE_ID".into()))?;
+            let repo = lead::repo_name(fleet.shell, repo.as_deref())?;
+            let out = lead::claim(fleet.shell, &repo, &pane, take_over)?;
+            print(json, &out, || match &out {
+                lead::LeadOutput::Claimed(c) => format!("lead {} on {}\n", c.lead, c.pane),
+                lead::LeadOutput::Exists(e) => format!("{}\n", e.next),
+            })?;
+            Ok(match out {
+                lead::LeadOutput::Claimed(_) => ExitCode::SUCCESS,
+                lead::LeadOutput::Exists(_) => ExitCode::from(error::EXIT_FULL),
+            })
         }
         Command::Cancel { ticket } => {
             let out = commands::cancel(fleet, &ticket)?;
@@ -226,6 +247,7 @@ fn report(cmd: Command, fleet: &Fleet, json: bool) -> Result<ExitCode> {
         Command::Spawn {
             ticket,
             lead,
+            take_over,
             machine,
             kind,
             name,
@@ -235,11 +257,13 @@ fn report(cmd: Command, fleet: &Fleet, json: bool) -> Result<ExitCode> {
             base,
             repo,
             cwd,
-            workspace,
         } => {
+            let pane = std::env::var("HERDR_PANE_ID").ok();
             let req = spawn::SpawnRequest {
                 ticket: ticket.as_deref(),
                 lead: lead.as_deref(),
+                pane: pane.as_deref(),
+                take_over,
                 machine: machine.as_deref(),
                 kind: &kind,
                 name: &name,
@@ -249,7 +273,6 @@ fn report(cmd: Command, fleet: &Fleet, json: bool) -> Result<ExitCode> {
                 base: base.as_deref(),
                 repo: repo.as_deref(),
                 cwd: cwd.as_deref(),
-                workspace: workspace.as_deref(),
             };
             spawn_cmd(fleet, &req, json)
         }

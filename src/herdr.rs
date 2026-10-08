@@ -8,6 +8,8 @@ use crate::shell::Shell;
 pub const SOURCE: &str = "wrangle";
 /// The mark on a child pane. Rendered red by the sidebar block in the README.
 pub const SUB_TOKEN: &str = "●";
+/// The prefix of a lead pane's `display_agent`.
+pub const LEAD_MARK: &str = "⌂";
 
 fn base(machine: Option<&str>, words: &[&str]) -> Vec<String> {
     let mut args = Vec::new();
@@ -20,7 +22,7 @@ fn base(machine: Option<&str>, words: &[&str]) -> Vec<String> {
 }
 
 /// `pane report-metadata <pane> --source wrangle --display-agent "↳ name"
-/// --token sub=● --token owner=<lead>`.
+/// --token sub=● --token lead=<lead>`.
 pub fn mark(
     shell: &dyn Shell,
     machine: Option<&str>,
@@ -30,7 +32,7 @@ pub fn mark(
 ) -> Result<()> {
     let display = format!("↳ {name}");
     let sub = format!("sub={SUB_TOKEN}");
-    let owner = format!("owner={lead}");
+    let owner = format!("lead={lead}");
     let args = base(
         machine,
         &[
@@ -64,10 +66,50 @@ pub fn unmark(shell: &dyn Shell, machine: Option<&str>, pane: &str) -> Result<()
             "--clear-token",
             "sub",
             "--clear-token",
+            "lead",
+            "--clear-token",
             "owner",
         ],
     );
     shell.run_ok("herdr", &args).map(|_| ())
+}
+
+/// The lead's own pane: `--display-agent "⌂ <repo>" --token role=lead
+/// --token repo=<repo>`. Always on this host: a lead runs where its user is.
+pub fn lead_mark(shell: &dyn Shell, pane: &str, repo: &str) -> Result<()> {
+    let display = format!("{LEAD_MARK} {repo}");
+    let repo_token = format!("repo={repo}");
+    let words = [
+        "pane",
+        "report-metadata",
+        pane,
+        "--source",
+        SOURCE,
+        "--display-agent",
+        &display,
+        "--token",
+        "role=lead",
+        "--token",
+        &repo_token,
+    ];
+    shell.run_ok("herdr", &base(None, &words)).map(|_| ())
+}
+
+/// Remove everything `lead_mark` reported (a take-over).
+pub fn lead_clear(shell: &dyn Shell, pane: &str) -> Result<()> {
+    let words = [
+        "pane",
+        "report-metadata",
+        pane,
+        "--source",
+        SOURCE,
+        "--clear-display-agent",
+        "--clear-token",
+        "role",
+        "--clear-token",
+        "repo",
+    ];
+    shell.run_ok("herdr", &base(None, &words)).map(|_| ())
 }
 
 /// `--token queue="N queued"` on the lead's own pane; cleared at zero.
@@ -251,10 +293,23 @@ mod tests {
     fn mark_builds_the_documented_command() {
         let shell = Fake::new();
         let cmd = "herdr --machine 8103 pane report-metadata w3:p2 --source wrangle \
-                   --display-agent ↳ reviewer --token sub=● --token owner=main-verify";
+                   --display-agent ↳ reviewer --token sub=● --token lead=lead:rondo";
         shell.on(cmd, "");
-        mark(&shell, Some("8103"), "w3:p2", "main-verify", "reviewer").unwrap();
+        mark(&shell, Some("8103"), "w3:p2", "lead:rondo", "reviewer").unwrap();
         assert_eq!(shell.calls(), vec![cmd.to_string()]);
+    }
+
+    #[test]
+    fn lead_mark_and_clear() {
+        let shell = Fake::new();
+        let set = "herdr pane report-metadata w42:p1 --source wrangle --display-agent ⌂ rondo \
+                   --token role=lead --token repo=rondo";
+        let clear = "herdr pane report-metadata w42:p1 --source wrangle --clear-display-agent \
+                     --clear-token role --clear-token repo";
+        shell.on(set, "").on(clear, "");
+        lead_mark(&shell, "w42:p1", "rondo").unwrap();
+        lead_clear(&shell, "w42:p1").unwrap();
+        assert_eq!(shell.calls(), vec![set.to_string(), clear.to_string()]);
     }
 
     #[test]
@@ -279,7 +334,7 @@ mod tests {
         let shell = Fake::new();
         shell.on(
             "herdr pane report-metadata w1:p5 --source wrangle --clear-display-agent \
-             --clear-token sub --clear-token owner",
+             --clear-token sub --clear-token lead --clear-token owner",
             "",
         );
         unmark(&shell, None, "w1:p5").unwrap();

@@ -56,6 +56,15 @@ esac
     }
 
     fn run(&self, args: &[&str], config: Option<&Path>) -> (i32, serde_json::Value, String) {
+        self.run_env(args, config, &[])
+    }
+
+    fn run_env(
+        &self,
+        args: &[&str],
+        config: Option<&Path>,
+        env: &[(&str, &str)],
+    ) -> (i32, serde_json::Value, String) {
         let path = format!(
             "{}:{}",
             self.dir.join("bin").display(),
@@ -66,7 +75,9 @@ esac
             .arg("--json")
             .env("PATH", path)
             .env("WRANGLE_STATE", self.dir.join("state"))
-            .env("HOME", self.dir.join("home"));
+            .env("HOME", self.dir.join("home"))
+            .env_remove("HERDR_PANE_ID")
+            .envs(env.iter().copied());
         match config {
             Some(c) => cmd.env("WRANGLE_CONFIG", c),
             None => cmd.env("WRANGLE_CONFIG", self.dir.join("missing.toml")),
@@ -141,7 +152,7 @@ fn admit_queues_when_full_and_admits_when_loosened() {
     );
     assert_eq!(code, 0, "{v}");
     assert!(rig.calls().contains(
-        "pane report-metadata w1:p3 --source wrangle --display-agent ↳ reviewer --token sub=● --token owner=lead-a"
+        "pane report-metadata w1:p3 --source wrangle --display-agent ↳ reviewer --token sub=● --token lead=lead-a"
     ));
     let (_, v, _) = rig.run(&["status"], Some(&loose));
     assert_eq!(v["queue"].as_array().unwrap().len(), 0);
@@ -253,7 +264,7 @@ fn spawn_places_starts_marks_and_prompts_for_non_pi_harnesses() {
     for expected in [
         "workspace create --cwd /tmp/repo --label unit-a --no-focus",
         "agent start unit-a --kind claude --pane w8:p1",
-        "pane report-metadata w8:p1 --source wrangle --display-agent ↳ unit-a --token sub=● --token owner=claude-main",
+        "pane report-metadata w8:p1 --source wrangle --display-agent ↳ unit-a --token sub=● --token lead=claude-main",
         "agent prompt unit-a do the thing",
     ] {
         assert!(
@@ -268,31 +279,87 @@ fn spawn_places_starts_marks_and_prompts_for_non_pi_harnesses() {
     assert_eq!(resv["ticket"], ticket);
     assert_eq!(resv["pane"], "w8:p1");
 
-    // A tab in an existing workspace; a failed start closes it and releases.
-    let (code, v, _) = rig.run(
+    // Without --lead the spawn claims the repo's lead on $HERDR_PANE_ID and
+    // opens the child as a tab in the lead's workspace; a failed start closes
+    // the tab and releases.
+    let (code, v, _) = rig.run_env(
         &[
             "spawn",
-            "--lead",
-            "claude-main",
+            "--repo",
+            "rondo",
             "--kind",
             "broken",
             "--name",
             "unit-b",
             "--message",
             "x",
-            "--workspace",
-            "w4",
         ],
         Some(&loose),
+        &[("HERDR_PANE_ID", "w4:p1")],
     );
     assert_eq!(code, 2, "{v}");
     assert!(v["error"].as_str().unwrap().contains("agent start"), "{v}");
     let calls = rig.calls();
+    assert!(
+        calls.contains(
+            "pane report-metadata w4:p1 --source wrangle --display-agent ⌂ rondo --token role=lead --token repo=rondo"
+        ),
+        "{calls}"
+    );
     assert!(calls.contains("tab create --workspace w4"), "{calls}");
     assert!(calls.contains("tab close w4:t9"), "{calls}");
     let (_, st, _) = rig.run(&["status"], Some(&loose));
     let reservations = st["hosts"][0]["probe"]["reservations"].as_array().unwrap();
     assert_eq!(reservations.len(), 1, "{st}");
+}
+
+#[test]
+fn one_lead_per_repo() {
+    let rig = Rig::new("lead");
+    rig.fake_herdr(
+        r#"{"result":{"agents":[{"agent_status":"working","pane_id":"w42:p1","workspace_id":"w42","name":"main","tokens":{"role":"lead","repo":"rondo"}},{"agent_status":"idle","pane_id":"w42:pX","name":"kid","tokens":{"lead":"lead:rondo","sub":"\u25cf"}}]}}"#,
+    );
+    let (code, v, _) = rig.run_env(
+        &["lead", "--repo", "rondo"],
+        None,
+        &[("HERDR_PANE_ID", "w42:p7")],
+    );
+    assert_eq!(code, 1, "{v}");
+    assert_eq!(v["lead_exists"], true);
+    assert_eq!(v["pane"], "w42:p1");
+
+    // A spawn from the second session is refused before it admits anything.
+    let (code, v, _) = rig.run_env(
+        &[
+            "spawn",
+            "--repo",
+            "rondo",
+            "--kind",
+            "pi",
+            "--name",
+            "u",
+            "--message",
+            "m",
+        ],
+        None,
+        &[("HERDR_PANE_ID", "w42:p7")],
+    );
+    assert_eq!(code, 2, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("agents send"), "{v}");
+    assert!(!rig.calls().contains("agent start"));
+
+    let (code, v, _) = rig.run(
+        &["lead", "--repo", "rondo", "--pane", "w42:p7", "--take-over"],
+        None,
+    );
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(v["lead"], "lead:rondo");
+    assert_eq!(v["took_over"], "w42:p1");
+    assert_eq!(v["workspace_id"], "w42");
+
+    let (_, st, _) = rig.run(&["status"], None);
+    assert_eq!(st["leads"][0]["lead"], "lead:rondo");
+    assert_eq!(st["leads"][0]["children"][0]["name"], "kid");
 }
 
 #[test]
@@ -370,7 +437,7 @@ fn spawn_queues_when_full_and_resumes_with_the_ticket() {
     assert_eq!(code, 0, "{v}");
     assert_eq!(v["ticket"], ticket);
     assert!(
-        rig.calls().contains("--token owner=codex-main"),
+        rig.calls().contains("--token lead=codex-main"),
         "lead comes from the queue entry"
     );
 }

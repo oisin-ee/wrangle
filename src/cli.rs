@@ -55,7 +55,20 @@ pub enum Command {
         #[arg(long, requires = "pane")]
         machine: Option<String>,
     },
-    /// Hosts plus every queued and reserved ticket.
+    /// Claim the lead for a repository on this pane (`⌂ <repo>`), or report
+    /// the pane that holds it (exit 1). One lead per repository.
+    Lead {
+        /// Repository directory or name; default: this directory.
+        #[arg(long)]
+        repo: Option<String>,
+        /// The lead's pane; default: `$HERDR_PANE_ID`.
+        #[arg(long)]
+        pane: Option<String>,
+        /// Move the lead here from another live pane.
+        #[arg(long)]
+        take_over: bool,
+    },
+    /// Leads with their children, hosts, and every queued and reserved ticket.
     Status {
         /// Refresh until interrupted.
         #[arg(long)]
@@ -112,11 +125,15 @@ pub enum Command {
     /// Exit 1 with a queued ticket when every host is full; retry with `--ticket`.
     Spawn {
         /// Resume a queued ticket (from an earlier `spawn` or `admit`).
-        #[arg(long, required_unless_present = "lead")]
+        #[arg(long)]
         ticket: Option<String>,
-        /// Your agent name; required without `--ticket`.
-        #[arg(long, required_unless_present = "ticket")]
+        /// Lead name. Default: claim the lead for `--repo` on `$HERDR_PANE_ID`
+        /// (exit 2 when another pane holds it).
+        #[arg(long)]
         lead: Option<String>,
+        /// With the claim: move the lead here from another live pane.
+        #[arg(long, conflicts_with = "lead")]
+        take_over: bool,
         /// Pin to one host (id or label).
         #[arg(long)]
         machine: Option<String>,
@@ -139,12 +156,9 @@ pub enum Command {
         base: Option<String>,
         #[arg(long)]
         repo: Option<String>,
-        /// Working directory for a new workspace or tab (no `--branch`); default: this directory.
+        /// Working directory for the child's tab (no `--branch`); default: this directory.
         #[arg(long)]
         cwd: Option<String>,
-        /// Add a tab to this workspace instead of creating a workspace (no `--branch`).
-        #[arg(long)]
-        workspace: Option<String>,
     },
     /// Show a toast in this host's Herdr window.
     Notify {
@@ -253,6 +267,27 @@ mod tests {
         assert!(Cli::try_parse_from(["wrangle", "admit"]).is_err());
         assert!(Cli::try_parse_from(["wrangle", "admit", "--lead", "x"]).is_ok());
         assert!(Cli::try_parse_from(["wrangle", "admit", "--ticket", "w-1"]).is_ok());
+    }
+
+    #[test]
+    fn spawn_lead_is_optional_and_workspace_is_gone() {
+        let base = [
+            "wrangle",
+            "spawn",
+            "--kind",
+            "pi",
+            "--name",
+            "a",
+            "--message",
+            "m",
+        ];
+        assert!(Cli::try_parse_from(base).is_ok());
+        let mut with_ws = base.to_vec();
+        with_ws.extend(["--workspace", "w1"]);
+        assert!(Cli::try_parse_from(with_ws).is_err());
+        let mut both = base.to_vec();
+        both.extend(["--lead", "x", "--take-over"]);
+        assert!(Cli::try_parse_from(both).is_err());
     }
 
     #[test]
