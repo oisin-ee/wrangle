@@ -64,16 +64,16 @@ ones, because a lead probes a remote host by running `wrangle` there.
 
 ```sh
 # mise (no Rust toolchain needed)
-mise use -g github:oisin-ee/wrangle@v0.2.0
+mise use -g github:oisin-ee/wrangle@v0.2.1
 
 # or cargo
-cargo install --git https://github.com/oisin-ee/wrangle --tag v0.2.0
+cargo install --git https://github.com/oisin-ee/wrangle --tag v0.2.1
 ```
 
 The Pi tool and the skill come from the same repository:
 
 ```sh
-pi install git:github.com/oisin-ee/wrangle@v0.2.0
+pi install git:github.com/oisin-ee/wrangle@v0.2.1
 ```
 
 Add `wrangle` to your Pi settings `packages` to keep it on `pi update`. The
@@ -148,7 +148,10 @@ admits. When `branch` is set, it runs the `prepare` hook on the
 admitted host. Then it calls `agents spawn` on that host with the same
 arguments. The result
 is Shepherdr's spawn result plus `host` and `ticket`. Pass-through fields:
-`agent_type`, `name`, `label`, `message`, `machine`, `cwd`, `base`, `blocking`.
+`agent_type`, `name`, `label`, `message`, `machine`, `cwd`, `base`.
+The spawn never blocks: the call returns once the child has its task, and the
+child's completion arrives later as a Shepherdr message. There is no `blocking`
+field.
 There is no `placement`, `workspace`, or `pane`: the layout follows from
 `branch`. A `lead_exists` result is an error that names the other lead.
 
@@ -200,7 +203,7 @@ already has `[ui.sidebar.agents]`, merge the `rows` by hand.
 popup pane. Install it on every host:
 
 ```sh
-herdr plugin install oisin-ee/wrangle --ref v0.2.0 --yes
+herdr plugin install oisin-ee/wrangle --ref v0.2.1 --yes
 ```
 
 - `pane.closed` and `pane.exited` run `wrangle release --pane <id>`. The

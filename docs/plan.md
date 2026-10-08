@@ -68,8 +68,8 @@ One public repo (`oisin-ee/wrangle`), four faces, one engine:
 ## Decisions
 
 1. **Never hold a call.** When every host is full, `wrangle` returns `{ queued, ticket }` at once. A timer
-   re-admits and wakes the lead with a message; the lead re-issues `wrangle ticket=T`. The `blocking` field
-   is passed through to `agents spawn` unchanged; it only decides whether Shepherdr waits for the child's reply.
+   re-admits and wakes the lead with a message; the lead re-issues `wrangle ticket=T`. The spawn is never
+   blocking either: `agents spawn` always gets `blocking: false`, and the child's reply arrives as a message.
 2. **Worktree creation is a hook, not hard-coded.** The config names a `prepare` argv template that runs on the
    admitted host and must print JSON with `pane_id`. The default is `agent:worktree`; a user can replace it. Hooks
    run only after admission, so a queued unit holds no pane or worktree.

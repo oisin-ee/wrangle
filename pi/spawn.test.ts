@@ -70,7 +70,7 @@ const PARAMS = { agent_type: "general", label: "unit-a", message: "do the thing"
 const ME = { fallback: "lead-1" };
 
 test("spawnArguments maps the call onto agents spawn and pins the prepared pane", () => {
-	const args = spawnArguments({ ...PARAMS, blocking: false, cwd: "/x" }, "local", "w1:p2");
+	const args = spawnArguments({ ...PARAMS, cwd: "/x" }, "local", "w1:p2");
 	assert.deepEqual(args, {
 		action: "spawn",
 		machine: "local",
@@ -86,6 +86,10 @@ test("spawnArguments maps the call onto agents spawn and pins the prepared pane"
 	const plain = spawnArguments(PARAMS, "local");
 	assert.equal(plain["placement"], undefined);
 	assert.equal(plain["workspace"], undefined);
+	// Never blocking, even for a stored ticket that still carries the old field.
+	assert.equal(plain["blocking"], false);
+	const stored = { ...PARAMS, blocking: true } as Parameters<typeof spawnArguments>[0];
+	assert.equal(spawnArguments(stored, "local")["blocking"], false);
 	assert.throws(() => spawnArguments({ label: "x" }, "local"), /agent_type is required/);
 });
 

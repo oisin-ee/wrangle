@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.2.1 - 2026-10-09
+
+- The Pi tool never blocks: every spawn goes to `agents spawn` with `blocking: false`, so the call
+  returns once the child has its task and the lead keeps working. The child's completion arrives
+  as a Shepherdr message. The `blocking` parameter is removed.
+
 ## 0.2.0 - 2026-10-08
 
 - One lead per repository. The first spawn from a Herdr pane claims the lead for the pane's

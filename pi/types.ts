@@ -23,7 +23,6 @@ export const WrangleParameters = Type.Object(
 			Type.String({ description: "Pin to one host (id or label). Omit to balance across hosts." }),
 		),
 		cwd: Type.Optional(Type.String()),
-		blocking: Type.Optional(Type.Boolean({ description: "Passed to agents spawn unchanged" })),
 		base: Type.Optional(Type.String({ description: "Base ref for the worktree and review" })),
 		// wrangle's own fields.
 		ticket: Type.Optional(

@@ -1,6 +1,6 @@
 {
   "name": "wrangle",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Admit, queue, and spawn coding agents across Herdr hosts. Pi tool, CLI, Herdr plugin, and skill.",
   "type": "module",
   "license": "MIT",

@@ -75,8 +75,11 @@ export function spawnArguments(
 		machine: host,
 		agent_type: required(params.agent_type, "agent_type"),
 		message: required(params.message, "message"),
+		// Never hold the lead: the call returns once the child has its task, and
+		// Shepherdr's monitor delivers the child's completion as a message.
+		blocking: false,
 	};
-	for (const key of ["name", "label", "cwd", "base", "blocking"] as const) {
+	for (const key of ["name", "label", "cwd", "base"] as const) {
 		if (params[key] !== undefined) args[key] = params[key];
 	}
 	if (pane) {
@@ -167,7 +170,7 @@ export async function runSpawn(
 	}
 
 	// Mark early when the pane is already known, so the sidebar shows the child
-	// as soon as it starts, even for blocking spawns.
+	// as soon as it starts.
 	if (pane) {
 		await engine
 			.mark({ pane, machine: host.id, lead, name: params.name ?? params.label ?? "child" })

@@ -29,7 +29,7 @@ One lead per repository. Your first `wrangle` call claims the lead for your repo
 
 4. Do not call `wrangle` again for the same ticket before the wake-up message. Do not call `wrangle action=status` in a loop. One `status` call is fine when you report.
 
-5. After the spawn, use `agents` for the child: `send`, `read`, `answer`, `watch`, `assign`. The child's completion arrives as a message. Do not wait on it with `sleep`.
+5. After the spawn, use `agents` for the child: `send`, `read`, `answer`, `watch`, `assign`. The call never waits for the child: it returns once the child has its task, and the child's completion or blockage arrives later as a message. Keep working on other units meanwhile. Do not wait on the child with `sleep`, `watch`, or a blocking `assign`.
 
 6. After you merge or drop a unit, remove its worktree with the repository's remove task (`agent:worktree-remove` in a repository that uses the agent harness). The reservation ends when the pane closes or when its TTL ends.
 

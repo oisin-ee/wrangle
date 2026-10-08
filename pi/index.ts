@@ -35,6 +35,8 @@ Calls (action defaults to spawn):
     Admits on the host with the most headroom, runs the prepare hook when
     branch is set (a worktree and pane on that host), else opens a tab in
     your workspace. Returns Shepherdr's spawn result plus host and ticket.
+    Never blocks: the call returns once the child has its task; its
+    completion arrives later as a message. Keep working meanwhile.
     When every host is full it returns {queued, ticket} at once; a wrangle
     message arrives when the ticket is admitted. Then call
     wrangle ticket=<ticket>; the stored arguments are reused. Never poll.
