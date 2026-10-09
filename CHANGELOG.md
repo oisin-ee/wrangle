@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- The `prepare` hook's `{repo}` is now valid on the admitted host. A directory resolves to its
+  main checkout, so a lead inside a linked worktree works. On a remote host the checkout is
+  relative to home, where ssh starts the hook. Hooks no longer need to rebuild the path from a
+  fixed folder such as `~/dev/<name>`.
+
 ## 0.3.0 - 2026-10-09
 
 - Lifecycle log: the ledger appends `queued`, `admitted`, `spawned`, `released`, and `cancelled`

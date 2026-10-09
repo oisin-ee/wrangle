@@ -127,6 +127,7 @@ pub enum Command {
         #[arg(long, default_value = "")]
         base: String,
         /// Repository path (or name, if the hook resolves names); default: this directory.
+        /// A path becomes its main checkout, relative to home on a remote host.
         #[arg(long)]
         repo: Option<String>,
     },

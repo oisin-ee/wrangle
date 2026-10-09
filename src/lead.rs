@@ -3,7 +3,7 @@
 //! `⌂ <repo>` in the sidebar. Children carry `lead=lead:<repo>`.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -27,32 +27,45 @@ pub fn repo_name(shell: &dyn Shell, repo: Option<&str>) -> Result<String> {
         Some(r) => r.to_string(),
         None => std::env::current_dir()?.display().to_string(),
     };
+    let checkout = main_checkout(shell, &dir)?;
+    checkout
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| Error::Parse {
+            origin: format!("git -C {dir} rev-parse --git-common-dir"),
+            detail: checkout.display().to_string(),
+        })
+}
+
+/// The main checkout of the repository that holds `dir`; a linked worktree
+/// resolves to its main repository.
+pub fn main_checkout(shell: &dyn Shell, dir: &str) -> Result<PathBuf> {
     let out = shell.run_ok(
         "git",
         &[
             "-C".to_string(),
-            dir.clone(),
+            dir.to_string(),
             "rev-parse".to_string(),
             "--path-format=absolute".to_string(),
             "--git-common-dir".to_string(),
         ],
     )?;
-    name_from_common_dir(&out.stdout).ok_or_else(|| Error::Parse {
+    checkout_from_common_dir(&out.stdout).ok_or_else(|| Error::Parse {
         origin: format!("git -C {dir} rev-parse --git-common-dir"),
         detail: out.stdout.trim().to_string(),
     })
 }
 
-/// `/x/rondo/.git` → `rondo`; a bare `/x/rondo.git` → `rondo.git`.
+/// `/x/rondo/.git` → `/x/rondo`; a bare `/x/rondo.git` stays `/x/rondo.git`.
 #[must_use]
-pub fn name_from_common_dir(text: &str) -> Option<String> {
+pub fn checkout_from_common_dir(text: &str) -> Option<PathBuf> {
     let path = Path::new(text.trim());
-    let named = if path.file_name()? == ".git" {
+    let checkout = if path.file_name()? == ".git" {
         path.parent()?
     } else {
         path
     };
-    named.file_name().map(|n| n.to_string_lossy().into_owned())
+    Some(checkout.to_path_buf())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,14 +263,14 @@ mod tests {
     ]}}"#;
 
     #[test]
-    fn common_dir_names() {
+    fn common_dir_checkouts() {
         assert_eq!(
-            name_from_common_dir("/Users/o/dev/rondo/.git\n").as_deref(),
-            Some("rondo")
+            checkout_from_common_dir("/Users/o/dev/rondo/.git\n"),
+            Some(PathBuf::from("/Users/o/dev/rondo"))
         );
         assert_eq!(
-            name_from_common_dir("/srv/rondo.git").as_deref(),
-            Some("rondo.git")
+            checkout_from_common_dir("/srv/rondo.git"),
+            Some(PathBuf::from("/srv/rondo.git"))
         );
     }
 
