@@ -98,6 +98,10 @@ remote_command = ["mise", "x", "--", "wrangle"]
 # Runs on the admitted host when a spawn names a branch. It must print one JSON
 # object with `pane_id` (and optionally `workspace_id`): a pane at a shell
 # prompt inside the new worktree. {repo}, {branch}, {base} are substituted.
+# {repo} is the main checkout of the lead's repository (a linked worktree
+# resolves to it). On a remote host it is relative to home, where ssh starts the
+# hook, so each host may keep the checkout under its own home. A name that is not
+# a directory passes through unchanged.
 prepare = ["sh", "-c", "cd {repo} && mise run -q agent:worktree -- {branch} {base}"]
 ```
 

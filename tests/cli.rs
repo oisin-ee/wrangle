@@ -307,6 +307,60 @@ fn prepare_runs_the_hook_template_and_parses_pane_id() {
 }
 
 #[test]
+fn prepare_from_a_linked_worktree_enters_the_main_checkout() {
+    let rig = Rig::new("prepare-worktree");
+    rig.fake_herdr(r#"{"result":{"agents":[]}}"#);
+    let main = rig.dir.join("home").join("any").join("repo");
+    let linked = main.join(".worktrees").join("unit");
+    fs::create_dir_all(&main).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .current_dir(&main)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    git(&["init", "-q"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&[
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "unit",
+        linked.to_str().unwrap(),
+    ]);
+    let top = git(&["rev-parse", "--show-toplevel"]);
+
+    let log = rig.dir.join("hook.log");
+    let config = rig.config(&format!(
+        "[hooks]\nprepare = [\"sh\", \"-c\", \"echo {{repo}} > {}; echo '{{\\\"pane_id\\\":\\\"w5:p1\\\"}}'\"]\n",
+        log.display()
+    ));
+    let (code, v, stderr) = rig.run(
+        &[
+            "prepare",
+            "--branch",
+            "feat-x",
+            "--repo",
+            linked.to_str().unwrap(),
+        ],
+        Some(&config),
+    );
+    assert_eq!(code, 0, "{v} {stderr}");
+    assert_eq!(fs::read_to_string(&log).unwrap().trim(), top);
+}
+
+#[test]
 fn spawn_places_starts_marks_and_prompts_for_non_pi_harnesses() {
     let rig = Rig::new("spawn");
     rig.fake_herdr(r#"{"result":{"agents":[]}}"#);
