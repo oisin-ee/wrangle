@@ -81,8 +81,13 @@ Pi tool calls Shepherdr's `agents` tool, so Shepherdr must be installed too.
 
 ## Configuration
 
-Optional file at `~/.config/wrangle/config.toml` (or `$WRANGLE_CONFIG`). Every
-key has a default. Unknown keys are an error.
+Two optional files. Every key has a default. Unknown keys are an error.
+
+- `~/.config/wrangle/config.toml` (or `$WRANGLE_CONFIG`): the host's policy.
+- `wrangle.toml` at the root of a repository: how that repository prepares a
+  child. See "Repository config" below.
+
+The host policy:
 
 ```toml
 load_per_core_max = 1.5        # host is full when load1 ≥ this × cores
@@ -101,9 +106,25 @@ remote_command = ["mise", "x", "--", "wrangle"]
 # {repo} is the main checkout of the lead's repository (a linked worktree
 # resolves to it). On a remote host it is relative to home, where ssh starts the
 # hook, so each host may keep the checkout under its own home. A name that is not
-# a directory passes through unchanged.
+# a directory passes through unchanged. A repository's wrangle.toml replaces it.
 prepare = ["sh", "-c", "cd {repo} && mise run -q agent:worktree -- {branch} {base}"]
 ```
+
+### Repository config
+
+A repository can carry `wrangle.toml` at its root. It holds only `[hooks]`;
+admission thresholds stay host policy.
+
+```toml
+[hooks]
+# Replaces the host's hooks.prepare for spawns from this repository.
+prepare = ["sh", "-c", "cd {repo} && ./scripts/prepare-child {branch} {base}"]
+```
+
+The lead reads the file from the main checkout of its repository, also when it
+runs in a linked worktree. The rendered command then runs on the admitted host.
+A missing file, or a file without `prepare`, uses the host policy. An invalid
+file is an error.
 
 ## CLI
 

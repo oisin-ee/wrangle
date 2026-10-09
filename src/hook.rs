@@ -1,10 +1,11 @@
 //! The `prepare` hook: an argv template from the policy, run on the admitted
 //! host after admission. It must print one JSON object with `pane_id`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::config;
 use crate::error::{Error, Result};
 use crate::hosts::{Fleet, Host};
 use crate::lead;
@@ -73,16 +74,32 @@ pub fn parse_output(stdout: &str, host: &Host) -> Result<Prepared> {
 /// host gets the checkout relative to the lead's home: hosts keep repositories
 /// at the same place under their own home, and ssh starts the hook there. Any
 /// other value (a name, or a path outside home) passes through unchanged.
-pub fn locate(fleet: &Fleet, host: &Host, repo: &str) -> Result<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Located {
+    /// The main checkout on the lead's host, when `repo` is a directory.
+    pub checkout: Option<PathBuf>,
+    /// The `{repo}` value for the admitted host.
+    pub repo: String,
+}
+
+pub fn locate(fleet: &Fleet, host: &Host, repo: &str) -> Result<Located> {
     if !Path::new(repo).is_dir() {
-        return Ok(repo.to_string());
+        return Ok(Located {
+            checkout: None,
+            repo: repo.to_string(),
+        });
     }
     let checkout = lead::main_checkout(fleet.shell, repo)?;
-    if host.is_local() {
-        return Ok(checkout.display().to_string());
-    }
-    Ok(relative_to_home(&checkout, Path::new(&fleet.home))
-        .unwrap_or_else(|| checkout.display().to_string()))
+    let repo = if host.is_local() {
+        checkout.display().to_string()
+    } else {
+        relative_to_home(&checkout, Path::new(&fleet.home))
+            .unwrap_or_else(|| checkout.display().to_string())
+    };
+    Ok(Located {
+        checkout: Some(checkout),
+        repo,
+    })
 }
 
 /// `checkout` relative to `home` (`.` for home itself). Git reports resolved
@@ -100,14 +117,19 @@ fn relative_to_home(checkout: &Path, home: &Path) -> Option<String> {
     }
 }
 
-/// Run the policy's `prepare` template on `host`.
+/// Run the `prepare` template on `host`: the repository's `wrangle.toml`
+/// template when it names one, else the policy's.
 pub fn run(fleet: &Fleet, host: &Host, inputs: HookInputs<'_>) -> Result<Prepared> {
-    let repo = locate(fleet, host, inputs.repo)?;
+    let located = locate(fleet, host, inputs.repo)?;
+    let repo_config = match &located.checkout {
+        Some(checkout) => config::load_repo(checkout)?,
+        None => config::RepoConfig::default(),
+    };
     let inputs = HookInputs {
-        repo: &repo,
+        repo: &located.repo,
         ..inputs
     };
-    let argv = render(&fleet.policy.hooks.prepare, inputs);
+    let argv = render(repo_config.prepare(fleet.policy), inputs);
     let Some((program, rest)) = argv.split_first() else {
         return Err(Error::Invalid("hooks.prepare is empty".into()));
     };
@@ -207,7 +229,7 @@ mod tests {
         assert_eq!(p.pane_id, "w9:p1");
 
         // A name, not a directory, reaches the hook unchanged.
-        assert_eq!(locate(&fleet, &host, "rondo").unwrap(), "rondo");
+        assert_eq!(locate(&fleet, &host, "rondo").unwrap().repo, "rondo");
     }
 
     #[test]
