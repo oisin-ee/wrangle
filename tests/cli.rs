@@ -8,6 +8,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// A command without the `GIT_*` variables of the caller. A git hook (such as
+/// the pre-commit check) exports `GIT_DIR` and `GIT_INDEX_FILE`; inherited,
+/// they point the test's git calls at the real repository.
+fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut cmd = Command::new(program);
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("GIT_") {
+            cmd.env_remove(key);
+        }
+    }
+    cmd
+}
+
 struct Rig {
     dir: PathBuf,
 }
@@ -70,7 +83,7 @@ esac
             self.dir.join("bin").display(),
             std::env::var("PATH").unwrap_or_default()
         );
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_wrangle"));
+        let mut cmd = isolated(env!("CARGO_BIN_EXE_wrangle"));
         cmd.args(args)
             .arg("--json")
             .env("PATH", path)
@@ -314,7 +327,7 @@ fn prepare_from_a_linked_worktree_enters_the_main_checkout() {
     let linked = main.join(".worktrees").join("unit");
     fs::create_dir_all(&main).unwrap();
     let git = |args: &[&str]| {
-        let out = Command::new("git")
+        let out = isolated("git")
             .args(["-c", "user.name=t", "-c", "user.email=t@t"])
             .args(args)
             .current_dir(&main)
