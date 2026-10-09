@@ -3,7 +3,7 @@
 
 id = "wrangle"
 name = "wrangle"
-version = "0.2.1"
+version = "0.3.0"
 min_herdr_version = "0.9.1"
 description = "Releases a child's wrangle reservation when its pane closes, and opens the fleet board."
 platforms = ["macos", "linux"]
