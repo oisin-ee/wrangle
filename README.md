@@ -64,16 +64,16 @@ ones, because a lead probes a remote host by running `wrangle` there.
 
 ```sh
 # mise (no Rust toolchain needed)
-mise use -g github:oisin-ee/wrangle@v0.3.0
+mise use -g github:oisin-ee/wrangle@v0.4.0
 
 # or cargo
-cargo install --git https://github.com/oisin-ee/wrangle --tag v0.3.0
+cargo install --git https://github.com/oisin-ee/wrangle --tag v0.4.0
 ```
 
 The Pi tool and the skill come from the same repository:
 
 ```sh
-pi install git:github.com/oisin-ee/wrangle@v0.3.0
+pi install git:github.com/oisin-ee/wrangle@v0.4.0
 ```
 
 Add `wrangle` to your Pi settings `packages` to keep it on `pi update`. The
@@ -235,7 +235,7 @@ already has `[ui.sidebar.agents]`, merge the `rows` by hand.
 popup pane. Install it on every host:
 
 ```sh
-herdr plugin install oisin-ee/wrangle --ref v0.3.0 --yes
+herdr plugin install oisin-ee/wrangle --ref v0.4.0 --yes
 ```
 
 - `pane.closed` and `pane.exited` run `wrangle release --pane <id>`. The

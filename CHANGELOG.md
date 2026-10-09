@@ -4,10 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.4.0 - 2026-10-09
+
 - Repository config: an optional `wrangle.toml` at the root of a repository sets
   `[hooks] prepare` for spawns from that repository. It replaces the host policy's hook. The lead
   reads it from the main checkout. Admission thresholds stay in `~/.config/wrangle/config.toml`.
-
 - The `prepare` hook's `{repo}` is now valid on the admitted host. A directory resolves to its
   main checkout, so a lead inside a linked worktree works. On a remote host the checkout is
   relative to home, where ssh starts the hook. Hooks no longer need to rebuild the path from a

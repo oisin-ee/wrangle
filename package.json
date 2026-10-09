@@ -1,6 +1,6 @@
 {
   "name": "wrangle",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Admit, queue, and spawn coding agents across Herdr hosts. Pi tool, CLI, Herdr plugin, and skill.",
   "type": "module",
   "license": "MIT",
@@ -25,8 +25,12 @@
     "test": "node --test \"pi/**/*.test.ts\""
   },
   "pi": {
-    "extensions": ["./pi/index.ts"],
-    "skills": ["./skills"]
+    "extensions": [
+      "./pi/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
