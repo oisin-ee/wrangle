@@ -152,16 +152,21 @@ impl Ledger {
     }
 
     /// Read the event stream. Call under the lock for a consistent snapshot.
+    /// The log is measurement only, so a torn or foreign line (for example a
+    /// crash mid-append) is skipped; it must never block admission or release.
     pub fn events(&self) -> Result<Vec<Event>> {
         let file = match fs::File::open(self.dir.join("events.jsonl")) {
             Ok(file) => file,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => return Err(e.into()),
         };
-        BufReader::new(file)
-            .lines()
-            .map(|line| Ok(serde_json::from_str(&line?)?))
-            .collect()
+        let mut events = Vec::new();
+        for line in BufReader::new(file).lines() {
+            if let Ok(event) = serde_json::from_str(&line?) {
+                events.push(event);
+            }
+        }
+        Ok(events)
     }
 
     /// Append under `with_lock`. Only retention compaction rewrites history.
@@ -183,7 +188,11 @@ impl Ledger {
             .create(true)
             .append(true)
             .open(path)?;
-        let mut line = serde_json::to_vec(event)?;
+        // Start on a fresh line if a previous append was torn mid-record.
+        let torn = fs::read(self.dir.join("events.jsonl"))
+            .is_ok_and(|bytes| bytes.last().is_some_and(|b| *b != b'\n'));
+        let mut line = if torn { vec![b'\n'] } else { Vec::new() };
+        serde_json::to_writer(&mut line, event)?;
         line.push(b'\n');
         file.write_all(&line)?;
         file.sync_all()?;
@@ -357,6 +366,21 @@ mod tests {
         let after = fs::read(l.dir.join("events.jsonl")).unwrap();
         assert!(after.starts_with(&before));
         assert_eq!(l.events().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn torn_event_line_never_blocks_the_ledger() {
+        let l = temp_ledger("events-torn");
+        let first = Event::new("a", "lead", EventKind::Admitted);
+        l.with_lock(|l| l.append_event(&first)).unwrap();
+        let mut f = fs::OpenOptions::new()
+            .append(true)
+            .open(l.dir.join("events.jsonl"))
+            .unwrap();
+        f.write_all(br#"{"ts_ms":1,"tick"#).unwrap();
+        let second = Event::new("b", "lead", EventKind::Spawned);
+        l.with_lock(|l| l.append_event(&second)).unwrap();
+        assert_eq!(l.events().unwrap(), vec![first, second]);
     }
 
     #[test]
