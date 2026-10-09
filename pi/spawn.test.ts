@@ -86,6 +86,7 @@ test("spawnArguments maps the call onto agents spawn and pins the prepared pane"
 	const plain = spawnArguments(PARAMS, "local");
 	assert.equal(plain["placement"], undefined);
 	assert.equal(plain["workspace"], undefined);
+	assert.equal(spawnArguments({ ...PARAMS, base: "main" }, "local")["base"], undefined);
 	// Never blocking, even for a stored ticket that still carries the old field.
 	assert.equal(plain["blocking"], false);
 	const stored = { ...PARAMS, blocking: true } as Parameters<typeof spawnArguments>[0];
@@ -132,6 +133,7 @@ test("branch set: prepare runs on the admitted host and the pane is pinned", asy
 	const spawnArgs = ctx.calls[0]?.args as Record<string, unknown>;
 	assert.equal(spawnArgs["placement"], "pane");
 	assert.equal(spawnArgs["pane"], "w9:p3");
+	assert.equal(spawnArgs["base"], undefined, "base belongs to prepare, not Shepherdr spawn");
 	// Marked once before the spawn (pane known) and once after (ticket attached).
 	assert.deepEqual(fake.calls.map((c) => c[0]), ["admit", "prepare", "mark", "mark"]);
 	assert.equal(out.result.details?.["ticket"], "w-1-aaaa");

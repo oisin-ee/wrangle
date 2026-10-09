@@ -96,6 +96,80 @@ esac
 }
 
 #[test]
+fn spawn_release_writes_private_history_and_report_needs_no_herdr() {
+    let rig = Rig::new("lifecycle");
+    rig.fake_herdr(r#"{"result":{"agents":[]}}"#);
+    let config = rig.config("load_per_core_max = 1000\ndisk_free_min_percent = 0\n");
+    let (code, spawned, _) = rig.run(
+        &[
+            "spawn",
+            "--lead",
+            "lead",
+            "--kind",
+            "pi",
+            "--name",
+            "child",
+            "--message",
+            "private task contents",
+            "--cwd",
+            "/tmp",
+        ],
+        Some(&config),
+    );
+    assert_eq!(code, 0, "{spawned}");
+    let ticket = spawned["ticket"].as_str().unwrap();
+    let (code, _, _) = rig.run(&["release", "--ticket", ticket], Some(&config));
+    assert_eq!(code, 0);
+    let contents = fs::read_to_string(rig.dir.join("state/events.jsonl")).unwrap();
+    assert!(!contents.contains("private task contents"));
+    let events: Vec<serde_json::Value> = contents
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(events.len(), 3);
+    for (event, expected) in events.iter().zip(["admitted", "spawned", "released"]) {
+        assert_eq!(event["event"], expected);
+        assert_eq!(event["ticket"], ticket);
+    }
+    // Reports read the ledger without discovering or probing the fleet.
+    fs::remove_file(rig.dir.join("bin/herdr")).unwrap();
+    let (code, report, _) = rig.run(&["report", "--since", "1h"], Some(&config));
+    assert_eq!(code, 0);
+    assert_eq!(report["tickets"][0]["queue_wait_ms"], 0);
+    let runtime = events[2]["ts_ms"].as_u64().unwrap() - events[1]["ts_ms"].as_u64().unwrap();
+    assert_eq!(report["tickets"][0]["run_time_ms"], runtime);
+    let text = Command::new(env!("CARGO_BIN_EXE_wrangle"))
+        .args(["report", "--since", "1h"])
+        .env("WRANGLE_STATE", rig.dir.join("state"))
+        .env("WRANGLE_CONFIG", &config)
+        .output()
+        .unwrap();
+    assert!(text.status.success());
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(text.contains(ticket));
+    assert!(text.contains("run time (ms)"));
+    assert!(text.lines().nth(1).unwrap().ends_with(&runtime.to_string()));
+}
+
+#[test]
+fn disk_refusal_is_in_status_and_history_report() {
+    let rig = Rig::new("disk-refusal");
+    rig.fake_herdr(r#"{"result":{"agents":[]}}"#);
+    let config = rig.config("disk_free_min_percent = 100\n");
+    let (code, queued, _) = rig.run(&["admit", "--lead", "lead"], Some(&config));
+    assert_eq!(code, 1, "{queued}");
+    let (code, status, _) = rig.run(&["status"], Some(&config));
+    assert_eq!(code, 0);
+    let reason = status["hosts"][0]["headroom"]["reason"].as_str().unwrap();
+    assert!(reason.starts_with("disk "));
+    let (code, report, _) = rig.run(&["report"], Some(&config));
+    assert_eq!(code, 0);
+    assert_eq!(report["hosts"][0]["host"], "local");
+    assert_eq!(report["hosts"][0]["count"], 1);
+    assert_eq!(report["hosts"][0]["reasons"][reason], 1);
+}
+
+#[test]
 fn probe_and_status_report_the_local_host() {
     let rig = Rig::new("probe");
     rig.fake_herdr(r#"{"result":{"agents":[{"agent_status":"idle"}]}}"#);
