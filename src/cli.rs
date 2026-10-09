@@ -80,6 +80,12 @@ pub enum Command {
         #[arg(long, conflicts_with = "watch")]
         sidebar: bool,
     },
+    /// Queue wait, run time, and host refusals from the local lifecycle log.
+    Report {
+        /// Include tickets active in this duration (for example 24h or 7d).
+        #[arg(long, value_parser = crate::report::duration_ms, value_name = "DURATION")]
+        since: Option<u64>,
+    },
     /// Drop a queued ticket and any reservation it holds.
     Cancel {
         #[arg(long)]

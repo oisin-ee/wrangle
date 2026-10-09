@@ -2,10 +2,13 @@
 //! tickets this host's leads are waiting on (lead host only).
 //!
 //! `~/.local/state/wrangle/` holds `lock/` (an atomic `create_dir` mutex),
-//! `reservations.json`, and `queue.json`. Reservations expire by TTL so a lead
+//! `reservations.json`, `queue.json`, and a 30-day `events.jsonl` lifecycle log.
+//! Reservations expire by TTL so a lead
 //! that dies between `admit` and `spawn` frees its slot without bookkeeping.
 
+use std::collections::BTreeMap;
 use std::fs;
+use std::io::{BufRead as _, BufReader, Write as _};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -34,6 +37,48 @@ pub struct QueueEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventKind {
+    Queued,
+    Admitted,
+    Spawned,
+    Released,
+    Cancelled,
+}
+
+/// Lifecycle metadata only: never a task prompt or message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Event {
+    pub ts_ms: u64,
+    pub ticket: String,
+    pub lead: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    pub event: EventKind,
+    /// Host id to refusal reason for this unsuccessful admission attempt.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub refusals: BTreeMap<String, String>,
+}
+
+impl Event {
+    pub fn new(ticket: &str, lead: &str, event: EventKind) -> Self {
+        Self {
+            ts_ms: now_ms(),
+            ticket: ticket.to_string(),
+            lead: lead.to_string(),
+            host: None,
+            pane: None,
+            event,
+            refusals: BTreeMap::new(),
+        }
+    }
+}
+
+pub const EVENT_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 
 #[derive(Debug, Clone)]
 pub struct Ledger {
@@ -104,6 +149,54 @@ impl Ledger {
 
     fn queue_path(&self) -> PathBuf {
         self.dir.join("queue.json")
+    }
+
+    /// Read the event stream. Call under the lock for a consistent snapshot.
+    /// The log is measurement only, so a torn or foreign line (for example a
+    /// crash mid-append) is skipped; it must never block admission or release.
+    pub fn events(&self) -> Result<Vec<Event>> {
+        let file = match fs::File::open(self.dir.join("events.jsonl")) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let mut events = Vec::new();
+        for line in BufReader::new(file).lines() {
+            if let Ok(event) = serde_json::from_str(&line?) {
+                events.push(event);
+            }
+        }
+        Ok(events)
+    }
+
+    /// Append under `with_lock`. Only retention compaction rewrites history.
+    pub fn append_event(&self, event: &Event) -> Result<()> {
+        let path = self.dir.join("events.jsonl");
+        let events = self.events()?;
+        let cutoff = now_ms().saturating_sub(EVENT_RETENTION_MS);
+        if events.iter().any(|e| e.ts_ms < cutoff) {
+            let tmp = self.dir.join("events.jsonl.tmp");
+            let mut file = fs::File::create(&tmp)?;
+            for kept in events.iter().filter(|e| e.ts_ms >= cutoff) {
+                serde_json::to_writer(&mut file, kept)?;
+                writeln!(file)?;
+            }
+            file.sync_all()?;
+            fs::rename(tmp, &path)?;
+        }
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        // Start on a fresh line if a previous append was torn mid-record.
+        let torn = fs::read(self.dir.join("events.jsonl"))
+            .is_ok_and(|bytes| bytes.last().is_some_and(|b| *b != b'\n'));
+        let mut line = if torn { vec![b'\n'] } else { Vec::new() };
+        serde_json::to_writer(&mut line, event)?;
+        line.push(b'\n');
+        file.write_all(&line)?;
+        file.sync_all()?;
+        Ok(())
     }
 
     fn lock_path(&self) -> PathBuf {
@@ -254,6 +347,57 @@ mod tests {
             created_ms,
             pane: None,
         }
+    }
+
+    #[test]
+    fn event_append_retains_recent_records_and_prunes_old_ones() {
+        let l = temp_ledger("events");
+        let mut old = Event::new("old", "lead", EventKind::Queued);
+        old.ts_ms = now_ms() - EVENT_RETENTION_MS - 1000;
+        let new = Event::new("new", "lead", EventKind::Admitted);
+        l.with_lock(|l| {
+            l.append_event(&old)?;
+            l.append_event(&new)
+        })
+        .unwrap();
+        assert_eq!(l.events().unwrap(), std::slice::from_ref(&new));
+        let before = fs::read(l.dir.join("events.jsonl")).unwrap();
+        l.with_lock(|l| l.append_event(&new)).unwrap();
+        let after = fs::read(l.dir.join("events.jsonl")).unwrap();
+        assert!(after.starts_with(&before));
+        assert_eq!(l.events().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn torn_event_line_never_blocks_the_ledger() {
+        let l = temp_ledger("events-torn");
+        let first = Event::new("a", "lead", EventKind::Admitted);
+        l.with_lock(|l| l.append_event(&first)).unwrap();
+        let mut f = fs::OpenOptions::new()
+            .append(true)
+            .open(l.dir.join("events.jsonl"))
+            .unwrap();
+        f.write_all(br#"{"ts_ms":1,"tick"#).unwrap();
+        let second = Event::new("b", "lead", EventKind::Spawned);
+        l.with_lock(|l| l.append_event(&second)).unwrap();
+        assert_eq!(l.events().unwrap(), vec![first, second]);
+    }
+
+    #[test]
+    fn event_append_serializes_concurrent_writers() {
+        let l = temp_ledger("event-lock");
+        thread::scope(|scope| {
+            for i in 0..8 {
+                let l = &l;
+                scope.spawn(move || {
+                    l.with_lock(|l| {
+                        l.append_event(&Event::new(&format!("t{i}"), "lead", EventKind::Admitted))
+                    })
+                    .unwrap();
+                });
+            }
+        });
+        assert_eq!(l.events().unwrap().len(), 8);
     }
 
     #[test]

@@ -134,6 +134,12 @@ do; the pane and the reservation stay.
 engine considers the local host and every enabled machine from
 `herdr machine list`.
 
+`wrangle report [--since 24h] [--json]` shows per-ticket durations in milliseconds, plus host refusal counts and reasons from local history.
+The duration filter accepts `ms`, `s`, `m`, `h`, or `d` and selects recent tickets and refusal attempts.
+Missing endpoints produce `-` (`null` in JSON), while immediate admission has zero queue wait.
+The ledger appends lifecycle metadata to `events.jsonl` under its lock, without prompts or messages, and removes records older than 30 days.
+`status` shows current refusal reasons in text and JSON.
+
 ## Pi tool
 
 The package registers one tool, `wrangle`. `action` defaults to `spawn`, so
@@ -148,7 +154,8 @@ admits. When `branch` is set, it runs the `prepare` hook on the
 admitted host. Then it calls `agents spawn` on that host with the same
 arguments. The result
 is Shepherdr's spawn result plus `host` and `ticket`. Pass-through fields:
-`agent_type`, `name`, `label`, `message`, `machine`, `cwd`, `base`.
+`agent_type`, `name`, `label`, `message`, `machine`, `cwd`.
+The `base` field goes only to the `prepare` hook, not to Shepherdr.
 The spawn never blocks: the call returns once the child has its task, and the
 child's completion arrives later as a Shepherdr message. There is no `blocking`
 field.

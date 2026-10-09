@@ -15,6 +15,7 @@ mod ledger;
 mod node;
 mod plan;
 mod probe;
+mod report;
 mod shell;
 mod spawn;
 
@@ -74,6 +75,11 @@ fn run(cli: Cli) -> Result<ExitCode> {
     let ledger = Ledger::new(ledger::default_dir());
     match cli.command {
         Command::Host(cmd) => host(cmd, shell, &ledger, &policy, json),
+        Command::Report { since } => {
+            let out = report::report(&ledger, since)?;
+            print(json, &out, || report::render(&out))?;
+            Ok(ExitCode::SUCCESS)
+        }
         cmd => {
             let fleet = Fleet::discover(&shell, &ledger, &policy, home())?;
             lead(cmd, &fleet, json)

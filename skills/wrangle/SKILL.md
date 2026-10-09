@@ -49,6 +49,12 @@ Exit 0 prints `{"spawned": true, "pane_id": …, "name": …}`. Exit 1 prints `{
 
 If `status` is `blocked`, the child sits on a startup dialog. Read its pane, answer the dialog with `herdr agent send-keys`, then prompt it.
 
+`wrangle report --since 24h` shows queue wait, run time, and host refusal counts with reasons, while `--json` returns structured data.
+The local ledger appends lifecycle metadata to `events.jsonl` without prompts or messages and removes records older than 30 days on each append.
+The duration filter accepts whole numbers with `ms`, `s`, `m`, `h`, or `d`.
+Missing endpoints produce unknown durations.
+Each queued admission attempt counts once per refused host.
+
 ## Rules
 
 - `machine` is a resource pin, not a work-to-host mapping. `wrangle` balances the hosts.

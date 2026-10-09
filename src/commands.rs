@@ -10,7 +10,7 @@ use crate::error::{Error, Result};
 use crate::herdr;
 use crate::hosts::{Fleet, Host, HostReport};
 use crate::lead::{self, LeadView};
-use crate::ledger::{QueueEntry, new_ticket, now_ms};
+use crate::ledger::{Event, EventKind, Ledger, QueueEntry, new_ticket, now_ms};
 use crate::plan::{Headroom, Plan, plan};
 use crate::probe::Probe;
 
@@ -160,6 +160,11 @@ pub fn admit(
                     .ok_or_else(|| Error::UnknownMachine(host.clone()))?;
                 match fleet.reserve(host, &lead, &ticket) {
                     Ok(outcome) if outcome.reserved => {
+                        fleet.ledger.with_lock(|l| {
+                            let mut event = Event::new(&ticket, &lead, EventKind::Admitted);
+                            event.host = Some(host.id.clone());
+                            l.append_event(&event)
+                        })?;
                         return Ok(AdmitOutput::Admitted(Box::new(Admitted {
                             admitted: true,
                             ticket,
@@ -190,14 +195,36 @@ pub fn admit(
         }
     }
 
+    queue_admission(fleet.ledger, ticket, &lead, pin.as_deref(), reports)
+}
+
+fn queue_admission(
+    ledger: &Ledger,
+    ticket: String,
+    lead: &str,
+    pin: Option<&str>,
+    reports: Vec<HostReport>,
+) -> Result<AdmitOutput> {
     let reason = full_reason(&reports);
-    fleet.ledger.with_lock(|l| {
+    ledger.with_lock(|l| {
+        // Retrying a full host must not reset the original queue wait.
+        let created_ms = l
+            .queue()?
+            .iter()
+            .find(|e| e.ticket == ticket)
+            .map_or_else(now_ms, |e| e.created_ms);
         l.enqueue(QueueEntry {
             ticket: ticket.clone(),
-            lead: lead.clone(),
-            created_ms: now_ms(),
-            machine: pin.clone(),
-        })
+            lead: lead.to_string(),
+            created_ms,
+            machine: pin.map(ToString::to_string),
+        })?;
+        let mut event = Event::new(&ticket, lead, EventKind::Queued);
+        event.refusals = reports
+            .iter()
+            .map(|r| (r.host.id.clone(), refusal_reason(r)))
+            .collect();
+        l.append_event(&event)
     })?;
     Ok(AdmitOutput::Queued(Queued {
         queued: true,
@@ -224,11 +251,7 @@ fn full_reason(reports: &[HostReport]) -> String {
     let mut parts: Vec<String> = reports
         .iter()
         .map(|r| {
-            let why = r
-                .error
-                .clone()
-                .or_else(|| r.headroom.as_ref().and_then(|h| h.reason.clone()))
-                .unwrap_or_else(|| "lost the reservation race".to_string());
+            let why = refusal_reason(r);
             format!("{}: {why}", r.host.label)
         })
         .collect();
@@ -238,11 +261,75 @@ fn full_reason(reports: &[HostReport]) -> String {
     parts.join("; ")
 }
 
+fn refusal_reason(report: &HostReport) -> String {
+    report
+        .error
+        .clone()
+        .or_else(|| report.headroom.as_ref().and_then(|h| h.reason.clone()))
+        .unwrap_or_else(|| "lost the reservation race".to_string())
+}
+
 /// Drop a ticket's reservation on every host and its queue entry here.
 pub fn release_ticket(fleet: &Fleet, ticket: &str) -> Result<Released> {
-    let released = fleet.release_ticket_everywhere(ticket);
-    let dequeued = fleet.ledger.with_lock(|l| l.dequeue(ticket))?.is_some();
-    Ok(Released { released, dequeued })
+    finish_ticket(fleet, ticket, EventKind::Released)
+}
+
+fn finish_ticket(fleet: &Fleet, ticket: &str, kind: EventKind) -> Result<Released> {
+    let prior = fleet
+        .ledger
+        .with_lock(|l| Ok(l.events()?.into_iter().rev().find(|e| e.ticket == ticket)))?;
+    // Do not claim a run ended if its known host refused the release.
+    let released = if let Some(host) = prior.as_ref().and_then(|e| e.host.as_deref()) {
+        let known = fleet.release_ticket(fleet.find(host)?, ticket)?.released;
+        known + fleet.release_ticket_everywhere(ticket)
+    } else {
+        fleet.release_ticket_everywhere(ticket)
+    };
+    fleet.ledger.with_lock(|l| {
+        let entry = l.dequeue(ticket)?;
+        let prior = l.events()?.into_iter().rev().find(|e| e.ticket == ticket);
+        // History survives reservation TTL, so a late release still ends the run.
+        let active = prior.as_ref().is_some_and(|e| !terminal(e.event));
+        if kind == EventKind::Cancelled && released == 0 && entry.is_none() && !active {
+            return Err(Error::UnknownTicket(ticket.to_string()));
+        }
+        if let Some(mut event) = prior
+            .filter(|e| !terminal(e.event))
+            .or_else(|| entry.as_ref().map(|q| Event::new(ticket, &q.lead, kind)))
+        {
+            event.ts_ms = now_ms();
+            event.event = kind;
+            event.refusals.clear();
+            l.append_event(&event)?;
+        }
+        Ok(Released {
+            released,
+            dequeued: entry.is_some(),
+        })
+    })
+}
+
+fn terminal(event: EventKind) -> bool {
+    matches!(event, EventKind::Released | EventKind::Cancelled)
+}
+
+fn finish_pane(ledger: &Ledger, host: &str, pane: &str) -> Result<()> {
+    ledger.with_lock(|l| {
+        let mut seen = HashSet::new();
+        for mut event in l.events()?.into_iter().rev() {
+            if seen.insert(event.ticket.clone())
+                && !terminal(event.event)
+                && event.host.as_deref() == Some(host)
+                && event.pane.as_deref() == Some(pane)
+            {
+                event.ts_ms = now_ms();
+                event.event = EventKind::Released;
+                event.refusals.clear();
+                l.append_event(&event)?;
+            }
+        }
+        Ok(())
+    })
 }
 
 /// Drop the reservation attached to a pane on one host (default: this one).
@@ -252,6 +339,7 @@ pub fn release_pane(fleet: &Fleet, pane: &str, machine: Option<&str>) -> Result<
         None => fleet.find(crate::hosts::LOCAL)?,
     };
     let out = fleet.release_pane(host, pane)?;
+    finish_pane(fleet.ledger, &host.id, pane)?;
     Ok(Released {
         released: out.released,
         dequeued: false,
@@ -259,10 +347,7 @@ pub fn release_pane(fleet: &Fleet, pane: &str, machine: Option<&str>) -> Result<
 }
 
 pub fn cancel(fleet: &Fleet, ticket: &str) -> Result<Cancelled> {
-    let r = release_ticket(fleet, ticket)?;
-    if r.released == 0 && !r.dequeued {
-        return Err(Error::UnknownTicket(ticket.to_string()));
-    }
+    let r = finish_ticket(fleet, ticket, EventKind::Cancelled)?;
     Ok(Cancelled {
         cancelled: true,
         ticket: ticket.to_string(),
@@ -327,7 +412,20 @@ pub fn mark(
     herdr::mark(fleet.shell, host.machine(), pane, lead, name)?;
     if let Some(t) = ticket {
         fleet.set_pane(host, t, pane)?;
-        fleet.ledger.with_lock(|l| l.dequeue(t))?;
+        fleet.ledger.with_lock(|l| {
+            l.dequeue(t)?;
+            if !l
+                .events()?
+                .iter()
+                .any(|e| e.ticket == t && e.event == EventKind::Spawned)
+            {
+                let mut event = Event::new(t, lead, EventKind::Spawned);
+                event.host = Some(host.id.clone());
+                event.pane = Some(pane.to_string());
+                l.append_event(&event)?;
+            }
+            Ok(())
+        })?;
     }
     Ok(Marked {
         marked: true,
@@ -558,6 +656,22 @@ mod tests {
         // Idempotent: the same ticket is reported admitted without a new reservation.
         let again = admit(&fleet, "ignored", None, Some(&queued.ticket)).unwrap();
         assert!(matches!(again, AdmitOutput::Admitted(_)));
+        let history = rig.ledger.events().unwrap();
+        let history: Vec<_> = history
+            .iter()
+            .filter(|e| e.ticket == queued.ticket)
+            .collect();
+        assert_eq!(
+            history.iter().map(|e| e.event).collect::<Vec<_>>(),
+            [EventKind::Queued, EventKind::Admitted]
+        );
+        let report = crate::report::report(&rig.ledger, None).unwrap();
+        let row = report
+            .tickets
+            .iter()
+            .find(|r| r.ticket == queued.ticket)
+            .unwrap();
+        assert_eq!(row.queue_wait_ms, Some(history[1].ts_ms - history[0].ts_ms));
         let st = status(&fleet).unwrap();
         assert_eq!(st.queue[0].state, "reserved");
         assert_eq!(st.queue[0].host.as_deref(), Some("local"));
@@ -585,6 +699,136 @@ mod tests {
             cancel(&fleet, &queued.ticket),
             Err(Error::UnknownTicket(_))
         ));
+    }
+
+    #[test]
+    fn lifecycle_records_three_events_and_reports_durations() {
+        let rig = rig("lifecycle", "{ 0 0 0 }");
+        let fleet = fleet(&rig);
+        let AdmitOutput::Admitted(admitted) = admit(&fleet, "lead", Some("local"), None).unwrap()
+        else {
+            unreachable!("expected admitted");
+        };
+        rig.shell.on(
+            "herdr pane report-metadata w1:p2 --source wrangle --display-agent ↳ child --token sub=● --token lead=lead",
+            "",
+        );
+        for _ in 0..2 {
+            mark(
+                &fleet,
+                None,
+                "w1:p2",
+                "lead",
+                "child",
+                Some(&admitted.ticket),
+                false,
+            )
+            .unwrap();
+        }
+        release_pane(&fleet, "w1:p2", None).unwrap();
+        release_ticket(&fleet, &admitted.ticket).unwrap();
+        let events = rig.ledger.events().unwrap();
+        assert_eq!(
+            events.iter().map(|e| e.event).collect::<Vec<_>>(),
+            [EventKind::Admitted, EventKind::Spawned, EventKind::Released]
+        );
+        assert!(
+            events
+                .iter()
+                .all(|e| e.ticket == admitted.ticket && e.lead == "lead")
+        );
+        assert_eq!(events[2].pane.as_deref(), Some("w1:p2"));
+        let report = crate::report::report(&rig.ledger, None).unwrap();
+        let ticket = &report.tickets[0];
+        assert_eq!(ticket.queue_wait_ms, Some(0));
+        let runtime = events[2].ts_ms - events[1].ts_ms;
+        assert_eq!(ticket.run_time_ms, Some(runtime));
+        let text = crate::report::render(&report);
+        assert!(text.contains("queue wait (ms)"));
+        assert!(text.contains(&admitted.ticket));
+        assert!(text.lines().nth(1).unwrap().ends_with(&runtime.to_string()));
+    }
+
+    #[test]
+    fn disk_and_load_refusals_appear_in_status_and_report() {
+        let rig = rig("refusals", "{ 0 0 0 }");
+        rig.shell.on("df -Pk /tmp/home", "FS 1000 863 137 87% /\n");
+        let fleet = fleet(&rig);
+        rig.shell.on(
+            &remote_key(&fleet, &["probe"]),
+            &remote_probe_body(1000.0, "[]"),
+        );
+        let AdmitOutput::Queued(queued) = admit(&fleet, "lead", None, None).unwrap() else {
+            unreachable!("expected queued");
+        };
+        let created = rig.ledger.queue().unwrap()[0].created_ms;
+        admit(&fleet, "ignored", None, Some(&queued.ticket)).unwrap();
+        assert_eq!(rig.ledger.queue().unwrap()[0].created_ms, created);
+        let status = status(&fleet).unwrap();
+        let json = serde_json::to_value(&status).unwrap();
+        let text = render_status(&status);
+        for (index, host) in status.hosts.iter().enumerate() {
+            let h = host.headroom.as_ref().unwrap();
+            assert!(!h.eligible);
+            let reason = h.reason.as_ref().unwrap();
+            assert!(text.contains(reason));
+            assert_eq!(json["hosts"][index]["headroom"]["reason"], *reason);
+        }
+        let report = crate::report::report(&rig.ledger, None).unwrap();
+        assert_eq!(report.tickets[0].queue_wait_ms, None);
+        let local = report.hosts.iter().find(|h| h.host == "local").unwrap();
+        assert_eq!(local.count, 2);
+        assert_eq!(local.reasons["disk 13.7% free < 15.0%"], 2);
+        assert!(crate::report::render(&report).contains("disk 13.7% free < 15.0%"));
+        assert!(
+            serde_json::to_string(&report)
+                .unwrap()
+                .contains("disk 13.7% free < 15.0%")
+        );
+        cancel(&fleet, &queued.ticket).unwrap();
+        let events = rig.ledger.events().unwrap();
+        assert_eq!(events.last().unwrap().event, EventKind::Cancelled);
+        assert!(!events.iter().any(|e| e.event == EventKind::Released));
+        assert!(cancel(&fleet, &queued.ticket).is_err());
+    }
+
+    #[test]
+    fn failed_remote_release_does_not_end_the_run() {
+        let rig = rig("failed-release", "{ 0 0 0 }");
+        let fleet = fleet(&rig);
+        rig.ledger
+            .with_lock(|l| {
+                let mut event = Event::new("remote", "lead", EventKind::Spawned);
+                event.host = Some("8103".into());
+                event.pane = Some("w1:p2".into());
+                l.append_event(&event)
+            })
+            .unwrap();
+        // No remote release response is registered: the host is unreachable.
+        assert!(release_ticket(&fleet, "remote").is_err());
+        assert!(cancel(&fleet, "remote").is_err());
+        assert_eq!(rig.ledger.events().unwrap().len(), 1);
+        assert_eq!(
+            crate::report::report(&rig.ledger, None).unwrap().tickets[0].run_time_ms,
+            None
+        );
+    }
+
+    #[test]
+    fn release_after_reservation_expiry_still_finishes_the_run() {
+        let mut rig = rig("expired-run", "{ 0 0 0 }");
+        rig.policy.reservation_ttl_ms = 0;
+        let fleet = fleet(&rig);
+        rig.ledger
+            .with_lock(|l| {
+                let mut event = Event::new("expired", "lead", EventKind::Spawned);
+                event.host = Some("local".into());
+                event.pane = Some("w1:p2".into());
+                l.append_event(&event)
+            })
+            .unwrap();
+        assert_eq!(release_pane(&fleet, "w1:p2", None).unwrap().released, 0);
+        assert_eq!(rig.ledger.events().unwrap()[1].event, EventKind::Released);
     }
 
     #[test]

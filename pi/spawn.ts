@@ -79,7 +79,7 @@ export function spawnArguments(
 		// Shepherdr's monitor delivers the child's completion as a message.
 		blocking: false,
 	};
-	for (const key of ["name", "label", "cwd", "base"] as const) {
+	for (const key of ["name", "label", "cwd"] as const) {
 		if (params[key] !== undefined) args[key] = params[key];
 	}
 	if (pane) {
