@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.3.0 - 2026-10-09
+
+- Lifecycle log: the ledger appends `queued`, `admitted`, `spawned`, `released`, and `cancelled`
+  events to `events.jsonl` under its lock. It stores no prompts or messages, keeps 30 days, and
+  skips a torn line instead of failing.
+- New command `wrangle report [--since <duration>] [--json]`: per-ticket queue wait and run time,
+  plus host refusal counts with reasons.
+- `wrangle status` shows the refusal reason for every ineligible host.
+- The Pi tool passes `base` only to the `prepare` hook, never to Shepherdr's spawn.
+
 ## 0.2.1 - 2026-10-09
 
 - The Pi tool never blocks: every spawn goes to `agents spawn` with `blocking: false`, so the call
