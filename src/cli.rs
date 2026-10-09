@@ -128,6 +128,7 @@ pub enum Command {
         base: String,
         /// Repository path (or name, if the hook resolves names); default: this directory.
         /// A path becomes its main checkout, relative to home on a remote host.
+        /// The checkout's `wrangle.toml` may replace the `prepare` hook.
         #[arg(long)]
         repo: Option<String>,
     },

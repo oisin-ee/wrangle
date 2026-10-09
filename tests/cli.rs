@@ -371,6 +371,38 @@ fn prepare_from_a_linked_worktree_enters_the_main_checkout() {
     );
     assert_eq!(code, 0, "{v} {stderr}");
     assert_eq!(fs::read_to_string(&log).unwrap().trim(), top);
+
+    // The repository's wrangle.toml (in the main checkout) replaces the
+    // policy's prepare hook, even when the lead runs in a linked worktree.
+    let repo_log = rig.dir.join("repo-hook.log");
+    fs::write(
+        main.join("wrangle.toml"),
+        format!(
+            "[hooks]\nprepare = [\"sh\", \"-c\", \"echo repo {{branch}} in {{repo}} > {}; echo '{{\\\"pane_id\\\":\\\"w6:p1\\\"}}'\"]\n",
+            repo_log.display()
+        ),
+    )
+    .unwrap();
+    let prepare = [
+        "prepare",
+        "--branch",
+        "feat-y",
+        "--repo",
+        linked.to_str().unwrap(),
+    ];
+    let (code, v, stderr) = rig.run(&prepare, Some(&config));
+    assert_eq!(code, 0, "{v} {stderr}");
+    assert_eq!(v["pane_id"], "w6:p1");
+    assert_eq!(
+        fs::read_to_string(&repo_log).unwrap().trim(),
+        format!("repo feat-y in {top}")
+    );
+
+    // An invalid repository file is an error, never a silent fallback.
+    fs::write(main.join("wrangle.toml"), "load_per_core_max = 2.0\n").unwrap();
+    let (code, v, _) = rig.run(&prepare, Some(&config));
+    assert_eq!(code, 2);
+    assert!(v["error"].as_str().unwrap().contains("wrangle.toml"));
 }
 
 #[test]

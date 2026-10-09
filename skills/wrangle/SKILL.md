@@ -59,5 +59,5 @@ Each queued admission attempt counts once per refused host.
 
 - `machine` is a resource pin, not a work-to-host mapping. `wrangle` balances the hosts.
 - There is no `placement` or `workspace` argument. The layout follows from `branch`.
-- Every writer gets its own branch. The `prepare` hook makes the worktree on the admitted host.
+- Every writer gets its own branch. The `prepare` hook makes the worktree on the admitted host. A repository can set its own hook in `wrangle.toml`.
 - Give the child one unit, its allowed files, its verification command, and commit authority. Do not give it the transcript.
